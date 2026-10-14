@@ -1,0 +1,110 @@
+"""Formatting toolbar, table styles and smart Ctrl+A."""
+import openpyxl
+
+import sheet_io as io
+import workbooks
+from conftest import key, open_in
+
+
+def style(g, r, c):
+    return g.sheet.styles.get((r, c)) or {}
+
+
+def test_toolbar_variables_belong_to_this_window(app):
+    """Tk variables without a master attach to the first Tk ever made (flaky toggles)."""
+    fb = app.fmtbar
+    assert all(v._tk is app.tk for v in fb.vars.values()) and fb.align._tk is app.tk
+    assert fb.merged._tk is app.tk
+    assert all(img.tk is app.tk for img in fb.icons.values())          # images too
+    assert all(img.tk is app.tk for img in app.save_icons.values())
+
+
+def test_format_bar(app, tmp_path):
+    path = workbooks.styled(tmp_path / "s.xlsx")
+    g, fb = open_in(app, path), app.fmtbar
+
+    g.select(1, 0, 1, 3)
+    key(app, "<Control-b>")
+    assert all(style(g, 1, c).get("bold") for c in range(4)) and fb.vars["bold"].get()
+    key(app, "<Control-b>")
+    assert not any(style(g, 1, c).get("bold") for c in range(4))
+
+    app.set_cells([(5, 0, "Big title")])
+    g.goto(5, 0)
+    fb.preset.set("Title")
+    fb.set_preset()
+    assert style(g, 5, 0) == {"size": 20.0, "bold": True} and fb.preset.get() == "Title"
+    assert g.rh(5) > g.rowh
+    fb.size.set("14")
+    fb.set_size()
+    assert style(g, 5, 0).get("size") == 14.0 and fb.preset.get() == ""
+
+    g.select(2, 0, 2, 3)
+    fb.vars["italic"].set(True)
+    fb.toggle("italic")
+    assert all(style(g, 2, c).get("italic") for c in range(4))
+    fb.normal()
+    assert not any(style(g, 2, c).get("italic") for c in range(4))
+    assert style(g, 2, 1).get("numfmt") == "#,##0"
+    fb.align.set("center")
+    fb.set_align("center")
+    app.format_cells(lambda s: {**s, "fg": "#c00000", "bg": "#fff2cc"})
+    assert style(g, 2, 1).get("align") == "center" and style(g, 2, 2).get("bg") == "#fff2cc"
+    g.goto(2, 3)
+    fb.set_align("justify")
+    app.undo()
+    assert style(g, 2, 3).get("align") == "center"
+    app.redo()
+    assert style(g, 2, 3).get("align") == "justify"
+
+    assert app.save()
+    ws = openpyxl.load_workbook(path).active
+    assert ws["A6"].font.sz == 14 and ws["A6"].font.b
+    assert ws["C3"].font.color.rgb == "FFC00000" and ws["C3"].fill.fgColor.rgb == "FFFFF2CC"
+    assert ws["B3"].alignment.horizontal == "center" and ws["B3"].number_format == "#,##0"
+    assert "A1:D1" in str(ws.merged_cells)
+    again = io.load(str(path))["Report"]
+    assert again.styles[(5, 0)]["size"] == 14.0 and again.styles[(2, 3)]["align"] == "justify"
+
+    g.select(2, 0, 2, 3)
+    fb.clear()
+    assert style(g, 2, 1) == {"numfmt": "#,##0"} and style(g, 2, 0) == {}
+
+
+def test_smart_select_all(app, tmp_path):
+    g = open_in(app, workbooks.sales(tmp_path / "t.xlsx"))
+    g.goto(3, 2)
+    key(app, "<Control-a>")
+    assert g.sel() == (0, 0, 5, 3) and app.ref["text"] == "A1:D6" and g.cur == (3, 2)
+    key(app, "<Control-a>")
+    assert app.ref["text"] == "All"
+    g.goto(2, 6)
+    key(app, "<Control-a>")
+    assert g.sel() == (1, 6, 2, 6)
+    g.goto(15, 10)
+    key(app, "<Control-a>")
+    assert app.ref["text"] == "All"
+    g.goto(6, 4)   # empty cell touching the block diagonally
+    key(app, "<Control-a>")
+    assert g.sel() == (0, 0, 6, 4)
+
+
+def test_table_styles(app, tmp_path):
+    path = workbooks.sales(tmp_path / "t.xlsx")
+    g, fb = open_in(app, path), app.fmtbar
+    g.goto(2, 1)
+    fb.apply_table("4472C4", False)
+    assert g.sel() == (0, 0, 5, 3)
+    assert style(g, 0, 2) == {"bg": "#4472c4", "fg": "#ffffff", "bold": True}
+    assert "bg" in style(g, 1, 0) and "bg" not in style(g, 2, 0) and "bg" in style(g, 3, 3)
+    fb.apply_table("70AD47", True)
+    assert style(g, 0, 0)["fg"] == "#000000" and style(g, 1, 0)["bg"] != "#4472c4"
+    fb.remove_table()
+    assert all(not style(g, r, c) for r in range(6) for c in range(4))
+    for _ in range(3):
+        app.undo()
+    assert not app.dirty()
+    fb.apply_table("ED7D31", False)
+    assert app.save()
+    ws = openpyxl.load_workbook(path).active
+    assert ws["A1"].fill.fgColor.rgb == "FFED7D31" and ws["A1"].font.b

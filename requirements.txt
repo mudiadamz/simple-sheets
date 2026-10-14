@@ -1,0 +1,3 @@
+openpyxl   # .xlsx / .xlsm
+xlrd       # .xls
+# .ods and .csv use the standard library only

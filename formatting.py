@@ -1,0 +1,335 @@
+"""Excel-style display formatting: number/date formats, colors, cell styles."""
+import calendar
+import colorsys
+import datetime as dt
+import re
+from decimal import ROUND_HALF_UP, Decimal
+
+NUMBER = re.compile(r"-?(0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?")
+ISO_DATE = re.compile(r"\d{4}-\d\d-\d\d([ T]\d\d:\d\d(:\d\d(\.\d+)?)?)?")
+EPOCH = dt.datetime(1899, 12, 30)  # Excel day 0
+DEFAULT_SIZE = 11.0                # Excel's default font size (pt)
+
+# text-style presets: font keys only, other formatting (fill, align, number format) is kept
+FONT_KEYS = ("bold", "italic", "underline", "strike", "size", "fg")
+PRESETS = {
+    "Title": {"size": 20.0, "bold": True},
+    "Heading 1": {"size": 16.0, "bold": True},
+    "Heading 2": {"size": 13.0, "bold": True},
+    "Paragraph": {},
+    "Caption": {"size": 9.0, "italic": True, "fg": "#595959"},
+}
+
+# default Office theme, in Excel's theme-index order (lt1, dk1, lt2, dk2, accents, links)
+THEME = ["FFFFFF", "000000", "E7E6E6", "44546A", "4472C4", "ED7D31",
+         "A5A5A5", "FFC000", "5B9BD5", "70AD47", "0563C1", "954F72"]
+THEME_KEYS = ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2",
+              "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"]
+
+
+def parse_number(s):
+    return float(s) if NUMBER.fullmatch(s) else None
+
+
+def parse_date(s):
+    if ISO_DATE.fullmatch(s):
+        try:
+            return dt.datetime.fromisoformat(s)
+        except ValueError:
+            return None
+    return None
+
+
+def general(n):
+    if n.is_integer() and abs(n) < 1e15:
+        return str(int(n))
+    return f"{n:.10g}"
+
+
+# ---------- number formats ----------
+
+def _sections(fmt):
+    out, cur, quoted = [], "", False
+    for ch in fmt:
+        if ch == '"':
+            quoted = not quoted
+        if ch == ";" and not quoted:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    return out + [cur]
+
+
+LIT = 0xE000  # literals become private-use chars so they never look like format codes
+LIT_RE = re.compile("[-]")
+TOKEN = re.compile(r'"([^"]*)"|\\(.)|_(.)|\*(.)|\[\$([^\]-]*)[^\]]*\]|\[([^\]]*)\]|(.)', re.S)
+
+
+def _parts(sec):
+    """-> (code, lits): format code with literal text i replaced by one private-use char LIT+i."""
+    code, lits = [], []
+    for m in TOKEN.finditer(sec):
+        quoted, esc, pad, fill, cur, bracket, ch = m.groups()
+        if ch is not None:
+            code.append(ch)
+            continue
+        if bracket is not None:  # [Red], [>100] ... ; keep elapsed time [h] [mm] [ss]
+            if re.fullmatch(r"[hms]+", bracket, re.I):
+                code.append(bracket)
+            continue
+        lit = next(v for v in (quoted, esc, " " if pad else None, "" if fill else None, cur) if v is not None)
+        code.append(chr(LIT + len(lits)))
+        lits.append(lit)
+    return "".join(code), lits
+
+
+def _lits(code, lits):
+    return LIT_RE.sub(lambda m: lits[ord(m.group(0)) - LIT], code)
+
+
+def is_date(sec):
+    code = re.sub(r"\.0+", "", _parts(sec)[0])
+    code = LIT_RE.sub("", code)
+    return bool(re.search(r"[ymdhs]", code, re.I)) and not re.search(r"[#?0]", code) \
+        and "general" not in code.lower()
+
+
+DATE_TOKEN = re.compile(r"([-])|yyyy|yy|mmmmm|mmmm|mmm|mm|m|dddd|ddd|dd|d|hh|h|ss|s"
+                        r"|am/pm|a/p|\.0+|.", re.I | re.S)
+
+
+def fmt_date(d, sec):
+    code, lits = _parts(sec)
+    toks = list(DATE_TOKEN.finditer(code))
+    ampm = re.search(r"am/pm|a/p", code, re.I) is not None
+    out, last = [], None
+    for i, m in enumerate(toks):
+        t = m.group(0)
+        tl = t.lower()
+        if m.group(1):
+            out.append(lits[ord(m.group(1)) - LIT])
+            continue
+        if tl in ("mm", "m"):  # minutes when after an hour or before seconds
+            nxt = next((x.group(0).lower() for x in toks[i + 1:] if x.group(0).lower()[:1] in "ymdhs"), "")
+            if last == "h" or nxt.startswith("s"):
+                out.append(f"{d.minute:02d}" if tl == "mm" else str(d.minute))
+                last = "m"
+                continue
+        if tl == "yyyy":
+            s = f"{d.year:04d}"
+        elif tl == "yy":
+            s = f"{d.year % 100:02d}"
+        elif tl == "mmmmm":
+            s = calendar.month_name[d.month][0]
+        elif tl == "mmmm":
+            s = calendar.month_name[d.month]
+        elif tl == "mmm":
+            s = calendar.month_abbr[d.month]
+        elif tl == "mm":
+            s = f"{d.month:02d}"
+        elif tl == "m":
+            s = str(d.month)
+        elif tl == "dddd":
+            s = calendar.day_name[d.weekday()]
+        elif tl == "ddd":
+            s = calendar.day_abbr[d.weekday()]
+        elif tl == "dd":
+            s = f"{d.day:02d}"
+        elif tl == "d":
+            s = str(d.day)
+        elif tl in ("hh", "h"):
+            h = (d.hour % 12 or 12) if ampm else d.hour
+            s = f"{h:02d}" if tl == "hh" else str(h)
+        elif tl in ("ss", "s"):
+            s = f"{d.second:02d}" if tl == "ss" else str(d.second)
+        elif tl == "am/pm":
+            s = "AM" if d.hour < 12 else "PM"
+        elif tl == "a/p":
+            s = "A" if d.hour < 12 else "P"
+        elif tl.startswith(".0"):
+            s = ("." + f"{d.microsecond:06d}")[:len(tl)]
+        else:
+            s = t
+        out.append(s)
+        if tl[:1] in "ymdhs":
+            last = tl[0]
+    return "".join(out)
+
+
+def fmt_number(n, fmt):
+    secs = _sections(fmt)
+    i = 0 if n > 0 or len(secs) == 1 else (1 if n < 0 else (2 if len(secs) > 2 else 0))
+    sec = secs[i]
+    neg = n < 0 and i == 0
+    n = abs(n)
+    if sec == "":
+        return ""
+    if is_date(sec):
+        return fmt_date(EPOCH + dt.timedelta(days=n), sec)
+    code, lits = _parts(sec)
+    if "general" in code.lower():
+        return ("-" if neg else "") + general(n)
+    idx = [k for k, ch in enumerate(code) if ch in "0#?"]
+    if not idx:  # literal-only section, e.g. "-"
+        return _lits(code.replace("@", ""), lits)
+    pre, core, post = code[:idx[0]], code[idx[0]:idx[-1] + 1], code[idx[-1] + 1:]
+    if "/" in core:  # fractions: not supported
+        return ("-" if neg else "") + general(n)
+    if pre.endswith("."):
+        pre, core = pre[:-1], "." + core
+    scale = 0
+    while post.startswith(","):
+        scale, post = scale + 1, post[1:]
+    v = n * 100 ** (pre + post).count("%") / 1000 ** scale
+    sci = re.fullmatch(r"([0#?.,]*)[eE]([+-])([0#?]+)", core)
+    if sci:
+        mant, sign, expd = sci.groups()
+        dec = sum(ch in "0#?" for ch in mant.partition(".")[2])
+        m, e = f"{v:.{dec}E}".split("E")
+        e = int(e)
+        s = f"{m}E{'-' if e < 0 else ('+' if sign == '+' else '')}{abs(e):0{len(expd)}d}"
+        zero = v == 0
+    else:
+        ip, dot, dp = core.partition(".")
+        dmax = sum(ch in "0#?" for ch in dp)
+        dmin = dp.count("0")
+        q = Decimal(repr(v)).quantize(Decimal(1).scaleb(-dmax), rounding=ROUND_HALF_UP)
+        zero = q == 0
+        s = f"{q:{',' if ',' in ip else ''}.{dmax}f}"
+        whole, _, frac = s.partition(".")
+        while len(frac) > dmin and frac.endswith("0"):
+            frac = frac[:-1]
+        imin = ip.count("0")
+        if whole == "0" and imin == 0:
+            whole = ""
+        elif "," not in whole and len(whole) < imin:
+            whole = whole.zfill(imin)
+        s = whole + ("." + frac if dot and (frac or dmax) else "")
+    out = _lits(pre, lits) + s + _lits(post, lits)
+    return ("-" + out) if neg and not zero else out
+
+
+def render(text, numfmt):
+    """Cell text -> what Excel would show for that number format."""
+    if not numfmt or not text or numfmt == "@":
+        return text
+    try:
+        n = parse_number(text)
+        if n is not None:
+            return fmt_number(n, numfmt)
+        d = parse_date(text)
+        if d is not None:
+            sec = _sections(numfmt)[0]
+            return fmt_date(d, sec) if is_date(sec) else text
+    except Exception:
+        pass
+    return text
+
+
+# ---------- colors / styles ----------
+
+def theme_colors(xml):
+    """Workbook theme XML -> 12 hex colors in theme-index order."""
+    if not xml:
+        return THEME
+    if isinstance(xml, bytes):
+        xml = xml.decode("utf-8", "replace")
+    found = dict(re.findall(r'<a:(dk1|lt1|dk2|lt2|accent[1-6]|hlink|folHlink)>\s*'
+                            r'<a:(?:srgbClr val|sysClr[^>]*?lastClr)="([0-9A-Fa-f]{6})"', xml))
+    return [found.get(k, d) for k, d in zip(THEME_KEYS, THEME)]
+
+
+def tint(hex6, t):
+    r, g, b = (int(hex6[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    l = l * (1 + t) if t < 0 else l * (1 - t) + t
+    return "#%02x%02x%02x" % tuple(round(x * 255) for x in colorsys.hls_to_rgb(h, l, s))
+
+
+def color_hex(color, theme):
+    """openpyxl Color -> '#rrggbb' or None."""
+    if color is None:
+        return None
+    try:
+        if color.type == "rgb":
+            if not isinstance(color.rgb, str) or len(color.rgb) < 6:
+                return None
+            base = color.rgb[-6:]
+        elif color.type == "theme":
+            base = theme[color.theme] if color.theme < len(theme) else None
+        elif color.type == "indexed":
+            from openpyxl.styles.colors import COLOR_INDEX
+            if color.indexed >= len(COLOR_INDEX) or color.indexed in (64, 65):
+                return None
+            base = COLOR_INDEX[color.indexed][-6:]
+        else:
+            return None
+        if base is None:
+            return None
+        return tint(base, color.tint) if color.tint else "#" + base.lower()
+    except Exception:
+        return None
+
+
+def cell_style(cell, theme, cache):
+    """openpyxl cell -> small style dict (or None for default look). Cached per style combo."""
+    # Cache by openpyxl's style ids. NOT by id(cell.font): openpyxl returns a new temporary proxy
+    # on every access, Python reuses freed ids, and cells then got another cell's (often empty) style.
+    arr = getattr(cell, "_style", None)
+    if not hasattr(arr, "fontId"):
+        arr = getattr(cell, "style_array", None)       # read-only cells
+    if arr is None:
+        return None                                     # empty read-only cell: no style
+    key = (arr.fontId, arr.fillId, arr.alignmentId, arr.numFmtId)
+    if key in cache:
+        return cache[key]
+    font, fill = getattr(cell, "font", None), getattr(cell, "fill", None)
+    al, nf = getattr(cell, "alignment", None), getattr(cell, "number_format", None)
+    st = {}
+    if font is not None:
+        for attr, name in (("b", "bold"), ("i", "italic"), ("u", "underline"), ("strike", "strike")):
+            if getattr(font, attr, None):
+                st[name] = True
+        fg = color_hex(font.color, theme)
+        if fg and fg != "#000000":
+            st["fg"] = fg
+        if font.sz and float(font.sz) != DEFAULT_SIZE:
+            st["size"] = float(font.sz)
+    if getattr(fill, "fill_type", None) == "solid":
+        bg = color_hex(fill.fgColor, theme)
+        if bg:
+            st["bg"] = bg
+    h = getattr(al, "horizontal", None)
+    if h in ("left", "right", "center", "centerContinuous", "justify", "distributed"):
+        st["align"] = {"centerContinuous": "center", "distributed": "justify"}.get(h, h)
+    if getattr(al, "wrap_text", None):
+        st["wrap"] = True
+    v = getattr(al, "vertical", None)
+    if v in ("top", "center", "justify", "distributed"):   # bottom (the default) isn't stored
+        st["valign"] = "top" if v == "top" else "center"
+    if nf and nf != "General":
+        st["numfmt"] = nf
+    cache[key] = st or None
+    return cache[key]
+
+
+def describe(st):
+    """Style dict -> short human text for the format panel."""
+    if not st:
+        return "General"
+    parts = [st.get("numfmt", "General")]
+    if st.get("size"):
+        parts.append(f"{st['size']:g}pt")
+    parts += [k.capitalize() for k in ("bold", "italic", "underline", "strike") if st.get(k)]
+    if st.get("align"):
+        parts.append(f"Align {st['align']}")
+    if st.get("valign"):
+        parts.append({"top": "Top", "center": "Middle"}.get(st["valign"], st["valign"]))
+    if st.get("wrap"):
+        parts.append("Wrap")
+    if st.get("fg"):
+        parts.append(f"Text {st['fg']}")
+    if st.get("bg"):
+        parts.append(f"Fill {st['bg']}")
+    return "  ·  ".join(parts)

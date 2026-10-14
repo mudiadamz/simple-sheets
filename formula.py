@@ -1,0 +1,1252 @@
+"""Small Excel formula engine: parse and evaluate common formulas over the loaded book."""
+import datetime as dt
+import math
+import random
+import re
+import statistics
+from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal
+
+from formatting import EPOCH, fmt_number, parse_date, parse_number, render
+
+MAXR, MAXC = 1048576, 16384
+
+
+class XLError(str):
+    """An Excel error value such as #DIV/0!."""
+
+
+class Serial(float):
+    """A number that is a date (Excel serial day); shown as a date."""
+
+
+class FormulaError(Exception):
+    def __init__(self, err):
+        super().__init__(err)
+        self.err = err
+
+
+DIV0, NA, NAME, NUM, REF, VALUE, CIRC = (XLError(e) for e in (
+    "#DIV/0!", "#N/A", "#NAME?", "#NUM!", "#REF!", "#VALUE!", "#CIRC!"))
+ERRORS = {e: e for e in (DIV0, NA, NAME, NUM, REF, VALUE, CIRC, XLError("#NULL!"))}
+MISSING = object()   # an empty argument, e.g. IF(A1,,1)
+
+
+# ---------- references ----------
+
+def col_index(letters):
+    n = 0
+    for ch in letters.upper():
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+
+def col_letters(i):
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+SHEET = r"(?:'(?:[^']|'')+'|[A-Za-z_][\w.]*)!"
+CELL = r"\$?[A-Za-z]{1,3}\$?\d+"
+TOKEN = re.compile(rf"""
+  (?P<ws>\s+)
+| (?P<str>"(?:[^"]|"")*")
+| (?P<err>\#(?:DIV/0!|N/A|NAME\?|NULL!|NUM!|REF!|VALUE!|CIRC!))
+| (?P<func>(?:_xlfn\.|_xlws\.)?[A-Za-z_][\w.]*)(?=\s*\()
+| (?P<ref>(?:{SHEET})?{CELL}(?::{CELL})?)(?![\w(])
+| (?P<cols>(?:{SHEET})?\$?[A-Za-z]{{1,3}}:\$?[A-Za-z]{{1,3}})(?![\w(])
+| (?P<rows>(?:{SHEET})?\$?\d+:\$?\d+)
+| (?P<num>(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)
+| (?P<bool>TRUE|FALSE)(?![\w(])
+| (?P<name>[A-Za-z_][\w.]*)
+| (?P<op><>|<=|>=|[-+*/^&=<>%(),;])
+""", re.X | re.I)
+
+
+def lex(s):
+    """-> [(kind, text)], unknown characters become ('bad', ch)."""
+    out, pos = [], 0
+    while pos < len(s):
+        m = TOKEN.match(s, pos)
+        if not m:
+            out.append(("bad", s[pos]))
+            pos += 1
+            continue
+        out.append((m.lastgroup, m.group()))
+        pos = m.end()
+    return out
+
+
+def split_sheet(tok):
+    if "!" not in tok:
+        return None, tok
+    sheet, ref = tok.rsplit("!", 1)
+    if sheet.startswith("'"):
+        sheet = sheet[1:-1].replace("''", "'")
+    return sheet, ref
+
+
+def parse_ref(kind, tok):
+    """-> (sheet or None, r1, c1, r2, c2), 0-based."""
+    sheet, ref = split_sheet(tok)
+    a, _, b = ref.partition(":")
+    b = b or a
+    if kind == "ref":
+        (c1, r1), (c2, r2) = (re.fullmatch(r"\$?([A-Za-z]+)\$?(\d+)", x).groups() for x in (a, b))
+        r1, r2, c1, c2 = int(r1) - 1, int(r2) - 1, col_index(c1), col_index(c2)
+    elif kind == "cols":
+        r1, r2, c1, c2 = 0, MAXR - 1, col_index(a.strip("$")), col_index(b.strip("$"))
+    else:
+        r1, r2, c1, c2 = int(a.strip("$")) - 1, int(b.strip("$")) - 1, 0, MAXC - 1
+    return sheet, min(r1, r2), min(c1, c2), max(r1, r2), max(c1, c2)
+
+
+def quote_sheet(name):
+    """Sheet name as written in a formula: quoted unless it is a plain word."""
+    plain = re.fullmatch(r"[A-Za-z_][\w.]*", name) and not re.fullmatch(r"[A-Za-z]{1,3}\d+", name)
+    return name if plain else "'" + name.replace("'", "''") + "'"
+
+
+def rename_sheet(formula, old, new):
+    """Point references at sheet `old` to `new`; new=None (sheet deleted) turns them into #REF!."""
+    out = []
+    for kind, tok in lex(formula):
+        if kind in ("ref", "cols", "rows") and "!" in tok:
+            sheet, ref = split_sheet(tok)
+            if sheet.lower() == old.lower():
+                tok = "#REF!" if new is None else f"{quote_sheet(new)}!{ref}"
+        out.append(tok)
+    return "".join(out)
+
+
+def references(formula):
+    """[(sheet or None, r1, c1, r2, c2)] referenced by a formula, in order. Works on half-typed text."""
+    if not formula.startswith("="):
+        return []
+    out = []
+    for kind, tok in lex(formula[1:]):
+        if kind in ("ref", "cols", "rows"):
+            try:
+                out.append(parse_ref(kind, tok))
+            except (AttributeError, ValueError):
+                pass
+    return out
+
+
+def shift(formula, dr, dc):
+    """Move relative references by (dr, dc), like Excel does when pasting a formula."""
+    def cell(m):
+        cabs, col, rabs, row = m.groups()
+        c = col_index(col) + (0 if cabs else dc)
+        r = int(row) - 1 + (0 if rabs else dr)
+        if r < 0 or c < 0:
+            raise ValueError
+        return f"{cabs}{col_letters(c)}{rabs}{r + 1}"
+
+    def col(m):
+        c = col_index(m.group(2)) + (0 if m.group(1) else dc)
+        if c < 0:
+            raise ValueError
+        return m.group(1) + col_letters(c)
+
+    def row(m):
+        r = int(m.group(2)) + (0 if m.group(1) else dr)
+        if r < 1:
+            raise ValueError
+        return m.group(1) + str(r)
+
+    out = []
+    for kind, tok in lex(formula):
+        if kind in ("ref", "cols", "rows"):
+            sheet, ref = tok.rsplit("!", 1) if "!" in tok else (None, tok)
+            try:
+                if kind == "ref":
+                    ref = re.sub(r"(\$?)([A-Za-z]{1,3})(\$?)(\d+)", cell, ref)
+                elif kind == "cols":
+                    ref = re.sub(r"(\$?)([A-Za-z]{1,3})", col, ref)
+                else:
+                    ref = re.sub(r"(\$?)(\d+)", row, ref)
+            except ValueError:
+                ref = "#REF!"
+            tok = f"{sheet}!{ref}" if sheet else ref
+        out.append(tok)
+    return "".join(out)
+
+
+def adjust(formula, home, target, axis, at, n):
+    """Fix references after rows/columns were inserted (n > 0) or deleted (n < 0) at index `at`
+    on sheet `target`. home = sheet the formula lives on. Deleted single cells become #REF!."""
+    def move(i):
+        """new index or None if deleted"""
+        if i < at:
+            return i
+        if n > 0:
+            return i + n
+        return None if i < at - n else i + n
+
+    def span(i1, i2):
+        a, b = move(i1), move(i2)
+        if n < 0 and a is None and b is None:
+            return None
+        if a is None:
+            a = at
+        if b is None:
+            b = at - 1
+        return (a, b) if a <= b else None
+
+    out = []
+    for kind, tok in lex(formula):
+        if kind in ("ref", "cols", "rows"):
+            sheet, ref = split_sheet(tok)
+            if (sheet or home).lower() == target.lower() and \
+                    not (kind == "cols" and axis == "row") and not (kind == "rows" and axis == "col"):
+                prefix = tok[:len(tok) - len(ref)]
+                parts = re.findall(r"(\$?)([A-Za-z]*)(\$?)(\d*)", ref)
+                parts = [p for p in parts if p[1] or p[3]]
+                idx = [(int(p[3]) - 1 if axis == "row" else col_index(p[1])) for p in parts]
+                new = span(idx[0], idx[-1]) if len(idx) == 2 else ((move(idx[0]),) * 2 if move(idx[0]) is not None else None)
+                if new is None:
+                    tok = prefix + "#REF!"
+                else:
+                    rebuilt = []
+                    for p, v in zip(parts, new):
+                        cabs, col, rabs, row = p
+                        if axis == "row" and row:
+                            row = str(v + 1)
+                        elif axis == "col" and col:
+                            col = col_letters(v)
+                        rebuilt.append(f"{cabs}{col}{rabs}{row}")
+                    tok = prefix + ":".join(rebuilt)
+        out.append(tok)
+    return "".join(out)
+
+
+# ---------- parser ----------
+
+class Parser:
+    """Precedence climbing, Excel order: comparison < & < +- < */ < ^ < unary minus < %."""
+
+    def __init__(self, text):
+        self.toks = [(k, t) for k, t in lex(text) if k != "ws"]
+        self.i = 0
+
+    def peek(self):
+        return self.toks[self.i] if self.i < len(self.toks) else (None, None)
+
+    def take(self):
+        tok = self.peek()
+        self.i += 1
+        return tok
+
+    def expect(self, text):
+        if self.take()[1] != text:
+            raise FormulaError(NAME)
+
+    def parse(self):
+        node = self.compare()
+        if self.i != len(self.toks):
+            raise FormulaError(NAME)
+        return node
+
+    def binary(self, ops, sub):
+        node = sub()
+        while self.peek()[0] == "op" and self.peek()[1] in ops:
+            op = self.take()[1]
+            node = ("bin", op, node, sub())
+        return node
+
+    def compare(self):
+        return self.binary(("=", "<>", "<", ">", "<=", ">="), self.concat)
+
+    def concat(self):
+        return self.binary(("&",), self.additive)
+
+    def additive(self):
+        return self.binary(("+", "-"), self.term)
+
+    def term(self):
+        return self.binary(("*", "/"), self.power)
+
+    def power(self):
+        return self.binary(("^",), self.unary)
+
+    def unary(self):
+        if self.peek() in (("op", "-"), ("op", "+")):
+            op = self.take()[1]
+            node = self.unary()
+            return ("neg", node) if op == "-" else node
+        node = self.primary()
+        while self.peek() == ("op", "%"):
+            self.take()
+            node = ("pct", node)
+        return node
+
+    def primary(self):
+        kind, tok = self.take()
+        if kind == "num":
+            return ("val", float(tok))
+        if kind == "str":
+            return ("val", tok[1:-1].replace('""', '"'))
+        if kind == "bool":
+            return ("val", tok.upper() == "TRUE")
+        if kind == "err":
+            return ("val", ERRORS.get(tok.upper(), XLError(tok.upper())))
+        if kind in ("ref", "cols", "rows"):
+            return ("ref",) + parse_ref(kind, tok)
+        if kind == "func":
+            name = re.sub(r"^_xl(fn|ws)\.", "", tok, flags=re.I).upper()
+            self.expect("(")
+            args = []
+            if self.peek() != ("op", ")"):
+                while True:
+                    if self.peek()[0] == "op" and self.peek()[1] in (",", ";", ")"):
+                        args.append(("missing",))
+                    else:
+                        args.append(self.compare())
+                    if self.peek()[0] == "op" and self.peek()[1] in (",", ";"):
+                        self.take()
+                        continue
+                    break
+            self.expect(")")
+            return ("call", name, args)
+        if (kind, tok) == ("op", "("):
+            node = self.compare()
+            self.expect(")")
+            return node
+        raise FormulaError(NAME)
+
+
+# ---------- values ----------
+
+def serial(d):
+    return (d - EPOCH).total_seconds() / 86400
+
+
+def from_serial(n):
+    return EPOCH + dt.timedelta(days=float(n))
+
+
+def literal(t):
+    """Typed value of a plain (non-formula) cell."""
+    if t == "":
+        return None
+    n = parse_number(t)
+    if n is not None:
+        return n
+    u = t.upper()
+    if u in ("TRUE", "FALSE"):
+        return u == "TRUE"
+    if u in ERRORS:
+        return ERRORS[u]
+    d = parse_date(t)
+    if d is not None:
+        return Serial(serial(d))
+    return t
+
+
+def num(v):
+    if isinstance(v, XLError):
+        raise FormulaError(v)
+    if v is None or v is MISSING:
+        return 0.0
+    if isinstance(v, bool):
+        return float(v)
+    if isinstance(v, (int, float)):
+        return v
+    if isinstance(v, Range):
+        return num(v.scalar())
+    if isinstance(v, str):
+        s = v.strip()
+        n = parse_number(s)
+        if n is not None:
+            return n
+        d = parse_date(s)
+        if d is not None:
+            return Serial(serial(d))
+    raise FormulaError(VALUE)
+
+
+def text(v):
+    if isinstance(v, XLError):
+        raise FormulaError(v)
+    if isinstance(v, Range):
+        return text(v.scalar())
+    if v is None or v is MISSING:
+        return ""
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    if isinstance(v, Serial):
+        d = from_serial(v)
+        return d.strftime("%Y-%m-%d") if d.time() == dt.time() else d.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(v, float):
+        return str(int(v)) if v.is_integer() and abs(v) < 1e15 else f"{v:.15g}"
+    return str(v)
+
+
+def truthy(v):
+    if isinstance(v, Range):
+        v = v.scalar()
+    if isinstance(v, XLError):
+        raise FormulaError(v)
+    if isinstance(v, str):
+        if v.upper() in ("TRUE", "FALSE"):
+            return v.upper() == "TRUE"
+        raise FormulaError(VALUE)
+    return bool(num(v))
+
+
+def rank(v):
+    return 2 if isinstance(v, bool) else 1 if isinstance(v, str) else 0
+
+
+def compare(a, b):
+    """-> -1 / 0 / 1 with Excel ordering: numbers < text < booleans; text is case-insensitive."""
+    for v in (a, b):
+        if isinstance(v, XLError):
+            raise FormulaError(v)
+    if a is None or a is MISSING:
+        a = "" if isinstance(b, str) else False if isinstance(b, bool) else 0.0
+    if b is None or b is MISSING:
+        b = "" if isinstance(a, str) else False if isinstance(a, bool) else 0.0
+    ra, rb = rank(a), rank(b)
+    if ra != rb:
+        return -1 if ra < rb else 1
+    if ra == 1:
+        a, b = a.casefold(), b.casefold()
+    return (a > b) - (a < b)
+
+
+class Range:
+    def __init__(self, eng, sheet, r1, c1, r2, c2):
+        s = eng.book[sheet]
+        if r2 >= MAXR - 1:   # whole column: stop at the data
+            r2 = max(len(s.rows) - 1, r1)
+        if c2 >= MAXC - 1:   # whole row
+            c2 = max(max((len(x) for x in s.rows), default=1) - 1, c1)
+        self.eng, self.sheet, self.r1, self.c1, self.r2, self.c2 = eng, sheet, r1, c1, r2, c2
+        self.h, self.w = r2 - r1 + 1, c2 - c1 + 1
+
+    def at(self, i, j):
+        return self.eng.cell(self.sheet, self.r1 + i, self.c1 + j)
+
+    def flat(self):
+        for i in range(self.h):
+            for j in range(self.w):
+                yield self.at(i, j)
+
+    def scalar(self):
+        if self.h == 1 and self.w == 1:
+            return self.at(0, 0)
+        raise FormulaError(VALUE)
+
+
+# ---------- engine ----------
+
+class Engine:
+    def __init__(self):
+        self.book, self.names, self.ids = {}, {}, {}
+        self.memo, self.busy, self.asts = {}, set(), {}
+        self.too_deep = False
+
+    def set_book(self, book):
+        self.book = book
+        self.names = {n.lower(): n for n in book}
+        self.ids = {id(s): n for n, s in book.items()}
+        self.clear()
+
+    def clear(self):
+        self.memo = {}
+
+    def display(self, sheet_obj, r, c):
+        """Text to show for a formula cell."""
+        name = self.ids.get(id(sheet_obj))
+        if name is None:
+            return ""
+        self.too_deep = False
+        v = self.cell(name, r, c)
+        if self.too_deep:   # long chain (e.g. running totals): calculate top-down, then retry
+            self.memo = {}
+            for rr in range(r + 1):
+                for cc in range(len(sheet_obj.rows[rr]) if rr < len(sheet_obj.rows) else 0):
+                    self.cell(name, rr, cc)
+            v = self.cell(name, r, c)
+        cached = sheet_obj.cache.get((r, c))
+        if v == NAME and cached is not None:   # a function we don't know: keep Excel's last result
+            return cached
+        return text(v) if not isinstance(v, XLError) else str(v)
+
+    def cell(self, sheet, r, c):
+        key = (sheet, r, c)
+        if key in self.memo:
+            return self.memo[key]
+        rows = self.book[sheet].rows
+        t = rows[r][c] if r < len(rows) and c < len(rows[r]) else ""
+        if len(t) > 1 and t[0] == "=":
+            if key in self.busy:
+                return CIRC
+            self.busy.add(key)
+            try:
+                v = self.evaluate(t, sheet)
+            finally:
+                self.busy.discard(key)
+        else:
+            v = literal(t)
+        self.memo[key] = v
+        return v
+
+    def evaluate(self, formula, sheet):
+        try:
+            ast = self.asts.get(formula)
+            if ast is None:
+                if len(self.asts) > 20000:
+                    self.asts.clear()
+                ast = self.asts[formula] = Parser(formula[1:]).parse()
+            v = self.ev(ast, sheet)
+            if isinstance(v, Range):
+                v = v.scalar()
+            if v is None or v is MISSING:
+                return 0.0
+            if isinstance(v, float) and not math.isfinite(v):
+                return NUM
+            return v
+        except FormulaError as e:
+            return e.err
+        except RecursionError:
+            self.too_deep = True
+            return NUM
+        except (ValueError, TypeError, OverflowError, ZeroDivisionError, IndexError):
+            return VALUE
+
+    def sheet_name(self, name, default):
+        if name is None:
+            return default
+        real = self.names.get(name.lower())
+        if real is None:
+            raise FormulaError(REF)
+        return real
+
+    def ev(self, node, sheet):
+        kind = node[0]
+        if kind == "val":
+            return node[1]
+        if kind == "missing":
+            return MISSING
+        if kind == "ref":
+            _, name, r1, c1, r2, c2 = node
+            name = self.sheet_name(name, sheet)
+            if r1 == r2 and c1 == c2:
+                return self.cell(name, r1, c1)
+            return Range(self, name, r1, c1, r2, c2)
+        if kind == "neg":
+            v = num(self.ev(node[1], sheet))
+            return -v
+        if kind == "pct":
+            return num(self.ev(node[1], sheet)) / 100
+        if kind == "bin":
+            return self.binop(node[1], self.ev(node[2], sheet), self.ev(node[3], sheet))
+        if kind == "call":
+            f = FUNCS.get(node[1])
+            if f is None:
+                raise FormulaError(NAME)
+            func, lazy = f
+            if lazy:
+                return func(self, [(lambda n=n: self.ev(n, sheet)) for n in node[2]])
+            return func(self, [self.ev(n, sheet) for n in node[2]])
+        raise FormulaError(NAME)
+
+    def binop(self, op, a, b):
+        if isinstance(a, Range):
+            a = a.scalar()
+        if isinstance(b, Range):
+            b = b.scalar()
+        if op == "&":
+            return text(a) + text(b)
+        if op in ("=", "<>", "<", ">", "<=", ">="):
+            c = compare(a, b)
+            return {"=": c == 0, "<>": c != 0, "<": c < 0, ">": c > 0, "<=": c <= 0, ">=": c >= 0}[op]
+        x, y = num(a), num(b)
+        if op == "+":
+            r = x + y
+            return Serial(r) if isinstance(x, Serial) != isinstance(y, Serial) else r
+        if op == "-":
+            r = x - y
+            return Serial(r) if isinstance(x, Serial) and not isinstance(y, Serial) else float(r)
+        if op == "*":
+            return x * y
+        if op == "/":
+            if y == 0:
+                raise FormulaError(DIV0)
+            return x / y
+        if op == "^":
+            if x == 0 and y < 0:
+                raise FormulaError(DIV0)
+            try:
+                r = math.pow(x, y)
+            except (ValueError, OverflowError):
+                raise FormulaError(NUM)
+            return r
+        raise FormulaError(NAME)
+
+
+# ---------- functions ----------
+
+FUNCS = {}
+
+
+def fn(*names, lazy=False):
+    def deco(f):
+        for n in names:
+            FUNCS[n] = (f, lazy)
+        return f
+    return deco
+
+
+def arg(args, i, default=MISSING):
+    v = args[i] if i < len(args) else MISSING
+    return default if v is MISSING else v
+
+
+def values(args):
+    """Flatten ranges and plain args."""
+    for a in args:
+        if isinstance(a, Range):
+            yield from a.flat()
+        elif a is not MISSING:
+            yield a
+
+
+def nums(args):
+    """Numbers like SUM sees them: ranges give only numeric cells, direct args are converted."""
+    out = []
+    for a in args:
+        if isinstance(a, Range):
+            for v in a.flat():
+                if isinstance(v, XLError):
+                    raise FormulaError(v)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    out.append(v)
+        elif a is not MISSING:
+            out.append(num(a))
+    return out
+
+
+def rnd(x, digits, mode):
+    q = Decimal(1).scaleb(-int(digits))
+    return float(Decimal(repr(float(x))).quantize(q, rounding=mode))
+
+
+def as_range(v):
+    if not isinstance(v, Range):
+        raise FormulaError(VALUE)
+    return v
+
+
+@fn("SUM")
+def _sum(e, a): return float(sum(nums(a)))
+
+
+@fn("AVERAGE")
+def _avg(e, a):
+    n = nums(a)
+    if not n:
+        raise FormulaError(DIV0)
+    return sum(n) / len(n)
+
+
+@fn("MIN")
+def _min(e, a): return float(min(nums(a), default=0))
+
+
+@fn("MAX")
+def _max(e, a): return float(max(nums(a), default=0))
+
+
+@fn("MEDIAN")
+def _median(e, a):
+    n = nums(a)
+    if not n:
+        raise FormulaError(NUM)
+    return float(statistics.median(n))
+
+
+@fn("PRODUCT")
+def _product(e, a): return float(math.prod(nums(a)))
+
+
+@fn("COUNT")
+def _count(e, a):
+    n = 0
+    for x in a:
+        if isinstance(x, Range):
+            n += sum(1 for v in x.flat() if isinstance(v, (int, float)) and not isinstance(v, bool))
+        elif x is not MISSING:
+            try:
+                num(x)
+                n += 1
+            except FormulaError:
+                pass
+    return float(n)
+
+
+@fn("COUNTA")
+def _counta(e, a): return float(sum(1 for v in values(a) if v is not None and v != ""))
+
+
+@fn("COUNTBLANK")
+def _countblank(e, a): return float(sum(1 for v in as_range(a[0]).flat() if v is None or v == ""))
+
+
+def _kth(largest):
+    def f(e, a):
+        n, k = sorted(nums([a[0]]), reverse=largest), int(num(a[1]))
+        if not 1 <= k <= len(n):
+            raise FormulaError(NUM)
+        return float(n[k - 1])
+    return f
+
+
+FUNCS["LARGE"], FUNCS["SMALL"] = (_kth(True), False), (_kth(False), False)
+
+
+@fn("ROUND")
+def _round(e, a): return rnd(num(a[0]), num(arg(a, 1, 0)), ROUND_HALF_UP)
+
+
+@fn("ROUNDUP")
+def _roundup(e, a): return rnd(num(a[0]), num(arg(a, 1, 0)), ROUND_UP)
+
+
+@fn("ROUNDDOWN", "TRUNC")
+def _rounddown(e, a): return rnd(num(a[0]), num(arg(a, 1, 0)), ROUND_DOWN)
+
+
+@fn("INT")
+def _int(e, a): return float(math.floor(num(a[0])))
+
+
+@fn("ABS")
+def _abs(e, a): return abs(num(a[0]))
+
+
+@fn("SIGN")
+def _sign(e, a):
+    x = num(a[0])
+    return float((x > 0) - (x < 0))
+
+
+@fn("MOD")
+def _mod(e, a):
+    x, y = num(a[0]), num(a[1])
+    if y == 0:
+        raise FormulaError(DIV0)
+    return x % y
+
+
+@fn("POWER")
+def _power(e, a): return e.binop("^", a[0], a[1])
+
+
+@fn("SQRT")
+def _sqrt(e, a):
+    x = num(a[0])
+    if x < 0:
+        raise FormulaError(NUM)
+    return math.sqrt(x)
+
+
+@fn("EXP")
+def _exp(e, a): return math.exp(num(a[0]))
+
+
+@fn("LN")
+def _ln(e, a):
+    x = num(a[0])
+    if x <= 0:
+        raise FormulaError(NUM)
+    return math.log(x)
+
+
+@fn("LOG")
+def _log(e, a):
+    x, b = num(a[0]), num(arg(a, 1, 10))
+    if x <= 0 or b <= 0 or b == 1:
+        raise FormulaError(NUM)
+    return math.log(x, b)
+
+
+@fn("LOG10")
+def _log10(e, a): return _log(e, [a[0], 10.0])
+
+
+@fn("PI")
+def _pi(e, a): return math.pi
+
+
+@fn("RAND")
+def _rand(e, a): return random.random()
+
+
+@fn("RANDBETWEEN")
+def _randbetween(e, a): return float(random.randint(math.ceil(num(a[0])), math.floor(num(a[1]))))
+
+
+# logic
+
+@fn("IF", lazy=True)
+def _if(e, a):
+    if truthy(a[0]()):
+        v = a[1]() if len(a) > 1 else True
+    else:
+        v = a[2]() if len(a) > 2 else False
+    return 0.0 if v is MISSING else v
+
+
+@fn("IFERROR", lazy=True)
+def _iferror(e, a):
+    try:
+        v = a[0]()
+        if isinstance(v, Range):
+            v = v.scalar()
+        if not isinstance(v, XLError):
+            return v
+    except FormulaError:
+        pass
+    return a[1]()
+
+
+@fn("IFNA", lazy=True)
+def _ifna(e, a):
+    try:
+        v = a[0]()
+        if isinstance(v, Range):
+            v = v.scalar()
+        if v != NA:
+            return v
+    except FormulaError as err:
+        if err.err != NA:
+            raise
+    return a[1]()
+
+
+@fn("IFS", lazy=True)
+def _ifs(e, a):
+    for i in range(0, len(a) - 1, 2):
+        if truthy(a[i]()):
+            return a[i + 1]()
+    raise FormulaError(NA)
+
+
+def bools(args):
+    out = []
+    for v in values(args):
+        if isinstance(v, XLError):
+            raise FormulaError(v)
+        if isinstance(v, bool) or isinstance(v, (int, float)):
+            out.append(bool(v))
+        elif isinstance(v, str) and v.upper() in ("TRUE", "FALSE"):
+            out.append(v.upper() == "TRUE")
+    if not out:
+        raise FormulaError(VALUE)
+    return out
+
+
+@fn("AND")
+def _and(e, a): return all(bools(a))
+
+
+@fn("OR")
+def _or(e, a): return any(bools(a))
+
+
+@fn("XOR")
+def _xor(e, a): return sum(bools(a)) % 2 == 1
+
+
+@fn("NOT")
+def _not(e, a): return not truthy(a[0])
+
+
+@fn("TRUE")
+def _true(e, a): return True
+
+
+@fn("FALSE")
+def _false(e, a): return False
+
+
+@fn("CHOOSE")
+def _choose(e, a):
+    i = int(num(a[0]))
+    if not 1 <= i < len(a):
+        raise FormulaError(VALUE)
+    return a[i]
+
+
+# text
+
+@fn("CONCATENATE", "CONCAT")
+def _concat(e, a): return "".join(text(v) for v in values(a))
+
+
+@fn("TEXTJOIN")
+def _textjoin(e, a):
+    sep, skip = text(a[0]), truthy(a[1])
+    parts = [text(v) for v in values(a[2:])]
+    return sep.join(p for p in parts if p or not skip)
+
+
+@fn("LEN")
+def _len(e, a): return float(len(text(a[0])))
+
+
+@fn("UPPER")
+def _upper(e, a): return text(a[0]).upper()
+
+
+@fn("LOWER")
+def _lower(e, a): return text(a[0]).lower()
+
+
+@fn("PROPER")
+def _proper(e, a): return text(a[0]).title()
+
+
+@fn("TRIM")
+def _trim(e, a): return re.sub(r" +", " ", text(a[0]).strip())
+
+
+@fn("LEFT")
+def _left(e, a): return text(a[0])[:max(int(num(arg(a, 1, 1))), 0)]
+
+
+@fn("RIGHT")
+def _right(e, a):
+    n = max(int(num(arg(a, 1, 1))), 0)
+    return text(a[0])[-n:] if n else ""
+
+
+@fn("MID")
+def _mid(e, a):
+    s, start, n = text(a[0]), int(num(a[1])), int(num(a[2]))
+    if start < 1 or n < 0:
+        raise FormulaError(VALUE)
+    return s[start - 1:start - 1 + n]
+
+
+@fn("SUBSTITUTE")
+def _substitute(e, a):
+    s, old, new = text(a[0]), text(a[1]), text(a[2])
+    if len(a) < 4 or a[3] is MISSING:
+        return s.replace(old, new) if old else s
+    k, pos = int(num(a[3])), -1
+    for _ in range(k):
+        pos = s.find(old, pos + 1)
+        if pos < 0:
+            return s
+    return s[:pos] + new + s[pos + len(old):]
+
+
+@fn("REPLACE")
+def _replace(e, a):
+    s, start, n, new = text(a[0]), int(num(a[1])), int(num(a[2])), text(a[3])
+    return s[:start - 1] + new + s[start - 1 + n:]
+
+
+def _find(case):
+    def f(e, a):
+        what, s, start = text(a[0]), text(a[1]), int(num(arg(a, 2, 1)))
+        pos = (s if case else s.lower()).find(what if case else what.lower(), start - 1)
+        if pos < 0:
+            raise FormulaError(VALUE)
+        return float(pos + 1)
+    return f
+
+
+FUNCS["FIND"], FUNCS["SEARCH"] = (_find(True), False), (_find(False), False)
+
+
+@fn("REPT")
+def _rept(e, a): return text(a[0]) * max(int(num(a[1])), 0)
+
+
+@fn("EXACT")
+def _exact(e, a): return text(a[0]) == text(a[1])
+
+
+@fn("VALUE")
+def _value(e, a): return float(num(text(a[0])))
+
+
+@fn("TEXT")
+def _text(e, a):
+    v, f = a[0], text(a[1])
+    if isinstance(v, Range):
+        v = v.scalar()
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return fmt_number(float(v), f)
+    return render(text(v), f)
+
+
+# dates
+
+@fn("TODAY")
+def _today(e, a): return Serial(math.floor(serial(dt.datetime.now())))
+
+
+@fn("NOW")
+def _now(e, a): return Serial(serial(dt.datetime.now()))
+
+
+@fn("DATE")
+def _date(e, a):
+    y, m, d = int(num(a[0])), int(num(a[1])), int(num(a[2]))
+    if y < 1900:
+        y += 1900
+    y, m = y + (m - 1) // 12, (m - 1) % 12 + 1
+    return Serial(serial(dt.datetime(y, m, 1) + dt.timedelta(days=d - 1)))
+
+
+@fn("YEAR")
+def _year(e, a): return float(from_serial(num(a[0])).year)
+
+
+@fn("MONTH")
+def _month(e, a): return float(from_serial(num(a[0])).month)
+
+
+@fn("DAY")
+def _day(e, a): return float(from_serial(num(a[0])).day)
+
+
+@fn("WEEKDAY")
+def _weekday(e, a): return float((from_serial(num(a[0])).weekday() + 1) % 7 + 1)   # Sunday = 1
+
+
+@fn("DAYS")
+def _days(e, a): return float(num(a[0]) - num(a[1]))
+
+
+# info
+
+@fn("ISBLANK")
+def _isblank(e, a): return (a[0].scalar() if isinstance(a[0], Range) else a[0]) is None
+
+
+@fn("ISNUMBER")
+def _isnumber(e, a):
+    v = a[0].scalar() if isinstance(a[0], Range) else a[0]
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+@fn("ISTEXT")
+def _istext(e, a):
+    v = a[0].scalar() if isinstance(a[0], Range) else a[0]
+    return isinstance(v, str) and not isinstance(v, XLError)
+
+
+@fn("ISERROR", lazy=True)
+def _iserror(e, a):
+    try:
+        v = a[0]()
+        return isinstance(v.scalar() if isinstance(v, Range) else v, XLError)
+    except FormulaError:
+        return True
+
+
+@fn("ISNA", lazy=True)
+def _isna(e, a):
+    try:
+        v = a[0]()
+        return (v.scalar() if isinstance(v, Range) else v) == NA
+    except FormulaError as err:
+        return err.err == NA
+
+
+@fn("NA")
+def _na(e, a): raise FormulaError(NA)
+
+
+@fn("ROWS")
+def _rows(e, a): return float(as_range(a[0]).h) if isinstance(a[0], Range) else 1.0
+
+
+@fn("COLUMNS")
+def _columns(e, a): return float(as_range(a[0]).w) if isinstance(a[0], Range) else 1.0
+
+
+# conditional aggregates
+
+def criteria(c):
+    """Excel criteria ("">5"", ""<>x"", ""a*"", 10) -> predicate."""
+    if isinstance(c, Range):
+        c = c.scalar()
+    if not isinstance(c, str) or isinstance(c, XLError):   # a number / boolean: equality
+        return lambda v: v is not None and not isinstance(v, XLError) and compare(v, c) == 0
+    m = re.match(r"(<=|>=|<>|<|>|=)?(.*)", c, re.S)
+    op, rhs = m.group(1) or "=", m.group(2)
+    n = parse_number(rhs)
+    target = n if n is not None else rhs
+    if isinstance(target, str) and op in ("=", "<>"):
+        if target == "":
+            empty = lambda v: v is None or v == ""
+            return empty if op == "=" else (lambda v: not empty(v))
+        pat = re.compile(re.escape(target).replace(r"\*", ".*").replace(r"\?", "."), re.I | re.S)
+        hit = lambda v: isinstance(v, str) and not isinstance(v, XLError) and pat.fullmatch(v) is not None
+        return hit if op == "=" else (lambda v: not hit(v))
+
+    def test(v):
+        if v is None or isinstance(v, XLError) or rank(v) != rank(target):
+            return op == "<>"
+        k = compare(v, target)
+        return {"=": k == 0, "<>": k != 0, "<": k < 0, ">": k > 0, "<=": k <= 0, ">=": k >= 0}[op]
+    return test
+
+
+def matching(pairs):
+    """pairs: [(range, criteria)] -> list of (i, j) positions where all criteria hold."""
+    first = as_range(pairs[0][0])
+    tests = [(as_range(r), criteria(c)) for r, c in pairs]
+    out = []
+    for i in range(first.h):
+        for j in range(first.w):
+            if all(t(r.at(i, j)) if i < r.h and j < r.w else False for r, t in tests):
+                out.append((i, j))
+    return out
+
+
+def picked(rng, pos):
+    vals = [rng.at(i, j) for i, j in pos if i < rng.h and j < rng.w]
+    return [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+
+
+@fn("SUMIF")
+def _sumif(e, a):
+    rng = as_range(a[0])
+    total = as_range(arg(a, 2, rng))
+    return float(sum(picked(total, matching([(rng, a[1])]))))
+
+
+@fn("COUNTIF")
+def _countif(e, a): return float(len(matching([(a[0], a[1])])))
+
+
+@fn("AVERAGEIF")
+def _averageif(e, a):
+    rng = as_range(a[0])
+    v = picked(as_range(arg(a, 2, rng)), matching([(rng, a[1])]))
+    if not v:
+        raise FormulaError(DIV0)
+    return sum(v) / len(v)
+
+
+def pairs_of(a):
+    return [(a[i], a[i + 1]) for i in range(0, len(a) - 1, 2)]
+
+
+@fn("SUMIFS")
+def _sumifs(e, a): return float(sum(picked(as_range(a[0]), matching(pairs_of(a[1:])))))
+
+
+@fn("COUNTIFS")
+def _countifs(e, a): return float(len(matching(pairs_of(a))))
+
+
+@fn("AVERAGEIFS")
+def _averageifs(e, a):
+    v = picked(as_range(a[0]), matching(pairs_of(a[1:])))
+    if not v:
+        raise FormulaError(DIV0)
+    return sum(v) / len(v)
+
+
+@fn("MAXIFS")
+def _maxifs(e, a): return float(max(picked(as_range(a[0]), matching(pairs_of(a[1:]))), default=0))
+
+
+@fn("MINIFS")
+def _minifs(e, a): return float(min(picked(as_range(a[0]), matching(pairs_of(a[1:]))), default=0))
+
+
+# lookup
+
+def scalar(v):
+    return v.scalar() if isinstance(v, Range) else v
+
+
+def find_exact(look, seq):
+    pred = criteria(look) if isinstance(look, str) and ("*" in look or "?" in look) else None
+    for k, v in enumerate(seq):
+        if pred(v) if pred else (v is not None and rank(v) == rank(look) and compare(v, look) == 0):
+            return k
+    return None
+
+
+def find_sorted(look, seq, descending=False):
+    """Largest value <= look (or smallest >= look when descending), like approximate MATCH."""
+    best = None
+    for k, v in enumerate(seq):
+        if v is None or isinstance(v, XLError) or rank(v) != rank(look):
+            continue
+        c = compare(v, look)
+        if (c <= 0) if not descending else (c >= 0):
+            best = k
+        elif not descending:
+            break
+    return best
+
+
+def _lookup(vertical):
+    def f(e, a):
+        look, rng, idx = scalar(a[0]), as_range(a[1]), int(num(a[2]))
+        approx = truthy(arg(a, 3, True))
+        size = rng.w if vertical else rng.h
+        if not 1 <= idx <= size:
+            raise FormulaError(REF)
+        n = rng.h if vertical else rng.w
+        keys = [rng.at(k, 0) if vertical else rng.at(0, k) for k in range(n)]
+        k = find_sorted(look, keys) if approx else find_exact(look, keys)
+        if k is None:
+            raise FormulaError(NA)
+        return rng.at(k, idx - 1) if vertical else rng.at(idx - 1, k)
+    return f
+
+
+FUNCS["VLOOKUP"], FUNCS["HLOOKUP"] = (_lookup(True), False), (_lookup(False), False)
+
+
+@fn("MATCH")
+def _match(e, a):
+    look, rng, kind = scalar(a[0]), as_range(a[1]), int(num(arg(a, 2, 1)))
+    seq = list(rng.flat())
+    k = find_exact(look, seq) if kind == 0 else find_sorted(look, seq, descending=kind < 0)
+    if k is None:
+        raise FormulaError(NA)
+    return float(k + 1)
+
+
+@fn("INDEX")
+def _index(e, a):
+    rng = as_range(a[0])
+    r, c = int(num(arg(a, 1, 0))), int(num(arg(a, 2, 0)))
+    if rng.h == 1 and len(a) < 3:   # one-row range: the single index is a column
+        r, c = 1, r
+    if r == 0 and c == 0:
+        raise FormulaError(VALUE)
+    r, c = r or 1, c or 1
+    if not (1 <= r <= rng.h and 1 <= c <= rng.w):
+        raise FormulaError(REF)
+    return rng.at(r - 1, c - 1)
+
+
+@fn("XLOOKUP")
+def _xlookup(e, a):
+    look, keys, out = scalar(a[0]), as_range(a[1]), as_range(a[2])
+    k = find_exact(look, list(keys.flat()))
+    if k is None:
+        if len(a) > 3 and a[3] is not MISSING:
+            return a[3]
+        raise FormulaError(NA)
+    return out.at(k, 0) if keys.w == 1 else out.at(0, k)   # vertical or horizontal lookup

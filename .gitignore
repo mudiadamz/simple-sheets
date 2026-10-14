@@ -1,0 +1,11 @@
+# build output
+dist/
+build/
+*.spec
+
+# Python / test caches
+__pycache__/
+.pytest_cache/
+
+# local sample data (not part of the project)
+test_file/
