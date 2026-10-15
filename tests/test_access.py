@@ -1,5 +1,7 @@
 """Accessibility: high contrast, interface size, colour-blind charts, keyboard-only use, command palette, tips."""
 
+import tkinter as tk
+
 import charts
 import keyboard_nav
 import palette
@@ -128,6 +130,30 @@ def test_command_palette(app):
     assert p.run().endswith("Page breaks") and app.page_breaks is True
     assert palette.score("ins fun", "Tools › Insert function…") == 0
     assert palette.score("fun", "Tools › Insert function…") == 0 and palette.score("x y", "abc") is None
+
+
+def test_palette_runs_postcommand_given_as_tcl_object(app):
+    """In the exe, cget('postcommand') returns a Tcl_Obj, not a str (eval() refused it)."""
+    filled = []
+    top = tk.Menu(app, tearoff=False)
+    sub = tk.Menu(top, tearoff=False, postcommand=lambda: filled.append(1) or sub.add_command(label="Late item"))
+    top.add_cascade(label="Sub", menu=sub)
+    real_cget = tk.Menu.cget
+
+    class TclObj:                       # stands in for _tkinter.Tcl_Obj: str() gives the script
+        def __init__(self, s):
+            self.s = s
+
+        def __str__(self):
+            return self.s
+    try:
+        tk.Menu.cget = lambda self, key: TclObj(str(real_cget(self, key))) if key == "postcommand" \
+            else real_cget(self, key)
+        found = [label for label, _m, _i in palette.commands(top)]
+    finally:
+        tk.Menu.cget = real_cget
+    assert filled and ("Sub", "Late item") in found
+    top.destroy()
 
 
 def test_tips(app):

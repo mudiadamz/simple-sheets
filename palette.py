@@ -22,7 +22,7 @@ def commands(menu, path=()):
             if sub:
                 sub_menu = menu.nametowidget(sub)
                 try:                                  # menus filled when opened (recent files, Sheet)
-                    post = sub_menu.cget("postcommand")
+                    post = str(sub_menu.cget("postcommand") or "")   # may come back as a Tcl object
                     if post:
                         sub_menu.tk.eval(post)
                 except tk.TclError:
