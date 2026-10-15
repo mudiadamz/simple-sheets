@@ -51,7 +51,7 @@ def test_load_csv_and_ods(tmp_path):
     p.write_text("a;b\n1;2\n", encoding="utf-8")
     assert io.load(str(p))["semi.csv"].rows == [["a", "b"], ["1", "2"]]
 
-    import pandas as pd   # only used to produce a real .ods file
+    import pandas as pd  # only used to produce a real .ods file
     pytest.importorskip("odf")
     ods = tmp_path / "t.ods"
     pd.DataFrame({"a": [1, 2], "b": ["x", None]}).to_excel(ods, engine="odf", index=False)

@@ -81,7 +81,7 @@ def test_insert_delete_rows_cols(app, tmp_path):
     assert app.save()
     w = openpyxl.load_workbook(path)["Main"]
     assert w["A4"].value == "B" and w["D6"].value == "=SUM(D2:D5)"
-    assert w["B4"].border.top.style is None   # the border was saved away with the delete
+    assert w["B4"].border.top.style == "thin"   # borders are cell formatting: undo brings them back too
 
 
 def test_border_moves_with_inserted_row(app, tmp_path):

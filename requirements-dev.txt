@@ -1,5 +1,11 @@
 -r requirements.txt
 pytest
 pyinstaller
+pillow   # build: draws the app icon
 pandas   # tests only: writes a sample .ods
 odfpy    # tests only
+xlwt     # tests only: writes sample .xls files
+msoffcrypto-tool   # tests only: makes password-protected sample files
+ruff   # lint check (python -m ruff check .)
+pytest-xdist   # tests run in 3 processes (pytest.ini)
+pyxlsb   # tests only: cross-checks the .xlsb files we write

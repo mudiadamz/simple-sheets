@@ -1,5 +1,5 @@
 """App name / version, shared by the app, the installer and the build."""
 APP_NAME = "Simple Sheets"
 APP_ID = "SimpleSheets"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 EXE_NAME = "SimpleSheets.exe"

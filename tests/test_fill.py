@@ -120,3 +120,19 @@ def test_ctrl_d_and_ctrl_r(app):
     g.goto(0, 2)
     key(app, "<Control-r>")                                       # single cell: copy from the left
     assert g.text(0, 2) == '=B1&"!"'
+
+
+def test_more_languages_quarters_and_custom_lists(app):
+    import fill
+    import settings
+    assert [t for _, t in fill.extend(["Senin"], 2)] == ["Selasa", "Rabu"]
+    assert [t for _, t in fill.extend(["enero", "febrero"], 1)] == ["marzo"]
+    assert [t for _, t in fill.extend(["Q3"], 3)] == ["Q4", "Q1", "Q2"]
+    assert [t for _, t in fill.extend(["Low"], 2)] == [None, None]            # unknown: copied
+    settings.set("fill_lists", [["Low", "Medium", "High"]])
+    assert [t for _, t in fill.extend(["Low"], 2)] == ["Medium", "High"]
+    import settings_ui
+    d = settings_ui.SettingsDialog(app)
+    assert "Low, Medium, High" in d.lists.get("1.0", "end")
+    d.lists.insert("end", "\nS, M, L, XL")
+    assert d.ok() and settings.get("fill_lists")[-1] == ["S", "M", "L", "XL"]

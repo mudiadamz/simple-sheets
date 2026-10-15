@@ -31,8 +31,10 @@ def test_hamburger_menu_replaces_toolbar(app):
     texts = all_texts(app)
     assert "☰" in texts
     assert not {"Open…", "Save", "Save As…", "↶ Undo", "↷ Redo"} & set(texts)
-    assert menu_labels(app.app_menu) == ["New", "Open…", "Open recent", "Save", "Save as…", "Undo", "Redo",
-                                         "Dark mode", "Exit"]
+    labels = menu_labels(app.app_menu)
+    core = ["New", "Open…", "Open recent", "Save", "Save as…", "Undo", "Redo", "View", "Exit"]
+    assert [x for x in labels if x in core] == core                   # in this order; other items may sit between
+    assert "Dark mode" in menu_labels(app.view_menu)                  # dark mode lives under View
     # menu, undo/redo and formatting share one row
     assert app.undo_btn.winfo_parent() == app.fmtbar.winfo_parent()
 

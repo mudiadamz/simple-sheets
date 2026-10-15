@@ -21,6 +21,15 @@ DARK = {
     "field_bg": "#2b2c2f", "select_bg": "#3c4a63", "menu_bg": "#2b2c2f", "menu_active": "#3c4a63",
     "tooltip_bg": "#3c4043", "tooltip_fg": "#e8eaed",
 }
+HIGH = {   # high contrast: white on black, yellow accents, strong lines
+    "dark": True, "contrast": True,
+    "bg": "#000000", "fg": "#ffffff", "muted": "#d0d0d0",
+    "cell_bg": "#000000", "cell_fg": "#ffffff", "grid_line": "#9a9a9a",
+    "header_bg": "#000000", "header_sel": "#00309c", "header_fg": "#ffffff", "header_line": "#ffffff",
+    "accent": "#ffff00", "hidden_mark": "#ffff00", "icon": "#ffffff",
+    "field_bg": "#000000", "select_bg": "#00309c", "menu_bg": "#000000", "menu_active": "#00309c",
+    "tooltip_bg": "#000000", "tooltip_fg": "#ffff00",
+}
 C = dict(LIGHT)
 LIGHT_THEME = None   # the platform's native ttk theme, remembered on first use
 
@@ -45,15 +54,17 @@ def base_styles(style, scale):
     style.configure("Bottom.TNotebook.Tab", padding=(int(14 * scale), int(3 * scale)))
     style.configure("Icon.Toolbutton", font=("Segoe UI Symbol", 12))
     for name, font in (("B", ("Segoe UI", 10, "bold")), ("I", ("Segoe UI", 10, "italic")),
-                       ("U", ("Segoe UI", 10, "underline")), ("N", ("Segoe UI", 10))):
+                       ("U", ("Segoe UI", 10, "underline")), ("S", ("Segoe UI", 10, "overstrike")),
+                       ("N", ("Segoe UI", 10))):
         style.configure(f"{name}.Toolbutton", font=font)
 
 
-def apply(app, dark):
-    """Switch the whole window between light and dark."""
+def apply(app, dark, contrast=False):
+    """Switch the whole window between light, dark and high contrast."""
     global LIGHT_THEME
     C.clear()
-    C.update(DARK if dark else LIGHT)
+    C.update(HIGH if contrast else DARK if dark else LIGHT)
+    dark = C["dark"]
     style = ttk.Style(app)
     if LIGHT_THEME is None:
         LIGHT_THEME = style.theme_use()
@@ -113,12 +124,17 @@ def style_menu(menu):
 
 
 def _title_bar(app, dark):
-    """Windows 10/11: dark title bar to match."""
-    if sys.platform != "win32":
-        return
+    """Windows 10/11: dark title bar to match. Done when the window is idle (asking for the window handle
+    right away would force a full layout and slow down opening the window)."""
+    if sys.platform != "win32" or (not dark and not getattr(app, "_dark_title", False)):
+        return                                   # light is the default: nothing to change
+    app._dark_title = dark
+    app.after_idle(lambda: _title_bar_now(app, dark))
+
+
+def _title_bar_now(app, dark):
     try:
         import ctypes
-        app.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(app.winfo_id())
         value = ctypes.c_int(1 if dark else 0)
         for attr in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (newer / older builds)

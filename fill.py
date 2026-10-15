@@ -6,7 +6,41 @@ import re
 from formatting import parse_date, parse_number
 
 CYCLES = [list(calendar.day_name), list(calendar.day_abbr),
-          list(calendar.month_name)[1:], list(calendar.month_abbr)[1:]]
+          list(calendar.month_name)[1:], list(calendar.month_abbr)[1:],
+          ["Q1", "Q2", "Q3", "Q4"]]
+# day / month names in more languages (the fill handle continues them like English ones)
+LANG_CYCLES = [
+    # Bahasa Indonesia
+    ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"],
+    ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"],
+    ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober",
+     "November", "Desember"],
+    ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
+    # Español
+    ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"],
+    ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+     "noviembre", "diciembre"],
+    # Français
+    ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"],
+    ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
+     "novembre", "décembre"],
+    # Deutsch
+    ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"],
+    ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+     "November", "Dezember"],
+    # Nederlands / Português
+    ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"],
+    ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"],
+]
+
+
+def custom_lists():
+    """Your own lists (Tools → Settings → fill lists), e.g. Low, Medium, High."""
+    try:
+        import settings
+        return [list(x) for x in settings.get("fill_lists", []) if len(x) > 1]
+    except Exception:
+        return []
 TEXT_NUM = re.compile(r"^(.*?)(\d+)(\D*)$", re.S)
 
 
@@ -47,7 +81,7 @@ def extend(values, count, copy=False):
         return [(k % n, (dates[-1] + dt.timedelta(days=step * (k + 1))).strftime("%Y-%m-%d"))
                 for k in range(count)]
 
-    for names in CYCLES:
+    for names in custom_lists() + CYCLES + LANG_CYCLES:
         lower = [x.lower() for x in names]
         idx = [lower.index(v.lower()) if v.lower() in lower else None for v in values]
         if all(i is not None for i in idx):

@@ -54,7 +54,7 @@ def test_styles_survive_repeated_save_and_reopen(app, tmp_path, rounds):
     p = tmp_path / "many.xlsx"
     expected = many_styles(p, n=200)
     for k in range(rounds):
-        g = open_in(app, p)
+        open_in(app, p)
         app.set_cells([(30 + k, 0, f"edit {k}")])     # any change, then save
         assert app.save(), app.dialogs
     check(io.load(str(p))["S"], expected)

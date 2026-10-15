@@ -27,7 +27,8 @@ class FormulaError(Exception):
 
 DIV0, NA, NAME, NUM, REF, VALUE, CIRC = (XLError(e) for e in (
     "#DIV/0!", "#N/A", "#NAME?", "#NUM!", "#REF!", "#VALUE!", "#CIRC!"))
-ERRORS = {e: e for e in (DIV0, NA, NAME, NUM, REF, VALUE, CIRC, XLError("#NULL!"))}
+SPILL, CALC = XLError("#SPILL!"), XLError("#CALC!")
+ERRORS = {e: e for e in (DIV0, NA, NAME, NUM, REF, VALUE, CIRC, SPILL, CALC, XLError("#NULL!"))}
 MISSING = object()   # an empty argument, e.g. IF(A1,,1)
 
 
@@ -54,7 +55,11 @@ CELL = r"\$?[A-Za-z]{1,3}\$?\d+"
 TOKEN = re.compile(rf"""
   (?P<ws>\s+)
 | (?P<str>"(?:[^"]|"")*")
-| (?P<err>\#(?:DIV/0!|N/A|NAME\?|NULL!|NUM!|REF!|VALUE!|CIRC!))
+| (?P<err>\#(?:DIV/0!|N/A|NAME\?|NULL!|NUM!|REF!|VALUE!|CIRC!|SPILL!|CALC!))
+| (?P<ext>'\[[^\]]+\][^']*'!{CELL}(?::{CELL})?|\[[^\]]+\][A-Za-z_][\w.]*!{CELL}(?::{CELL})?)
+| (?P<table>(?:[A-Za-z_][\w.]*)?\[(?:[^\[\]]|\[[^\[\]]*\])*\])
+| (?P<array>\{{[^{{}}]*\}})
+| (?P<spillref>(?:{SHEET})?{CELL}\#)
 | (?P<func>(?:_xlfn\.|_xlws\.)?[A-Za-z_][\w.]*)(?=\s*\()
 | (?P<ref>(?:{SHEET})?{CELL}(?::{CELL})?)(?![\w(])
 | (?P<cols>(?:{SHEET})?\$?[A-Za-z]{{1,3}}:\$?[A-Za-z]{{1,3}})(?![\w(])
@@ -104,6 +109,43 @@ def parse_ref(kind, tok):
     return sheet, min(r1, r2), min(c1, c2), max(r1, r2), max(c1, c2)
 
 
+def remap_ref(kind, ref, span_r, span_c):
+    """One reference (no sheet prefix) through row/column maps.
+    span_r / span_c: (first, last) original 0-based index -> new (first, last), or None if all deleted.
+    Returns the new reference text ($ kept) or '#REF!'."""
+    parts = [p for p in re.findall(r"(\$?)([A-Za-z]*)(\$?)(\d*)", ref) if p[1] or p[3]]
+    if not parts:
+        return ref
+    rows = [int(p[3]) - 1 for p in parts if p[3]]
+    cols = [col_index(p[1]) for p in parts if p[1]]
+    nr = span_r(min(rows), max(rows)) if rows else None
+    nc = span_c(min(cols), max(cols)) if cols else None
+    if (rows and nr is None) or (cols and nc is None):
+        return "#REF!"
+    out = []
+    for i, (cabs, col, rabs, row) in enumerate(parts):
+        end = 0 if i == 0 else 1
+        if col:
+            col = col_letters(nc[end])
+        if row:
+            row = str(nr[end] + 1)
+        out.append(f"{cabs}{col}{rabs}{row}")
+    return ":".join(out)
+
+
+def remap(text, home, target, span_r, span_c):
+    """Rewrite every reference to sheet `target` in a formula (references without a sheet
+    belong to `home`) after rows/columns moved. See remap_ref."""
+    out = []
+    for kind, tok in lex(text):
+        if kind in ("ref", "cols", "rows"):
+            sheet, ref = split_sheet(tok)
+            if (sheet or home or "").lower() == target.lower():
+                tok = tok[:len(tok) - len(ref)] + remap_ref(kind, ref, span_r, span_c)
+        out.append(tok)
+    return "".join(out)
+
+
 def quote_sheet(name):
     """Sheet name as written in a formula: quoted unless it is a plain word."""
     plain = re.fullmatch(r"[A-Za-z_][\w.]*", name) and not re.fullmatch(r"[A-Za-z]{1,3}\d+", name)
@@ -120,6 +162,60 @@ def rename_sheet(formula, old, new):
                 tok = "#REF!" if new is None else f"{quote_sheet(new)}!{ref}"
         out.append(tok)
     return "".join(out)
+
+
+def transpose_refs(formula, src, dst):
+    """Formula copied from cell src to dst with Paste special → Transpose: relative references keep their
+    distance, with rows and columns swapped (Excel does the same)."""
+    sr, sc = src
+    tr, tc = dst
+
+    def cell(m):
+        cabs, col, rabs, row = m.groups()
+        r, c = int(row) - 1, col_index(col)
+        dr, dc = (0 if rabs else r - sr), (0 if cabs else c - sc)
+        nr = r if rabs else tr + dc
+        nc = c if cabs else tc + dr
+        if nr < 0 or nc < 0:
+            raise ValueError
+        return f"{cabs}{col_letters(nc)}{rabs}{nr + 1}"
+    out = []
+    for kind, tok in lex(formula[1:]):
+        if kind == "ref":
+            sheet, ref = split_sheet(tok)
+            try:
+                ref = re.sub(r"(\$?)([A-Za-z]{1,3})(\$?)(\d+)", cell, ref)
+            except ValueError:
+                return "=#REF!"
+            tok = (tok[:len(tok) - len(split_sheet(tok)[1])] if sheet else "") + ref
+        out.append(tok)
+    return "=" + "".join(out)
+
+
+def move_refs(formula, home, target, rect, dr, dc):
+    """Cells `rect` (r1, c1, r2, c2) on sheet `target` were moved by (dr, dc): references that lie wholly
+    inside the block follow it ($ or not), like Excel's cut & paste / drag. home = sheet the formula is on."""
+    if not formula.startswith("="):
+        return formula
+    r1, c1, r2, c2 = rect
+    out, changed = [], False
+    for kind, tok in lex(formula[1:]):
+        if kind == "ref":
+            sheet, ref = split_sheet(tok)
+            if (sheet or home).lower() == target.lower():
+                try:
+                    _, a1, b1, a2, b2 = parse_ref("ref", tok)
+                except (AttributeError, ValueError):
+                    a1 = None
+                if a1 is not None and r1 <= a1 and a2 <= r2 and c1 <= b1 and b2 <= c2:
+                    def cell(m):
+                        cabs, col, rabs, row = m.groups()
+                        return f"{cabs}{col_letters(col_index(col) + dc)}{rabs}{int(row) + dr}"
+                    ref = re.sub(r"(\$?)([A-Za-z]{1,3})(\$?)(\d+)", cell, ref)
+                    tok = (tok[:len(tok) - len(split_sheet(tok)[1])] if sheet else "") + ref
+                    changed = True
+        out.append(tok)
+    return "=" + "".join(out) if changed else formula
 
 
 def references(formula):
@@ -284,6 +380,22 @@ class Parser:
             node = ("pct", node)
         return node
 
+    def call_args(self):
+        self.expect("(")
+        args = []
+        if self.peek() != ("op", ")"):
+            while True:
+                if self.peek()[0] == "op" and self.peek()[1] in (",", ";", ")"):
+                    args.append(("missing",))
+                else:
+                    args.append(self.compare())
+                if self.peek()[0] == "op" and self.peek()[1] in (",", ";"):
+                    self.take()
+                    continue
+                break
+        self.expect(")")
+        return args
+
     def primary(self):
         kind, tok = self.take()
         if kind == "num":
@@ -296,6 +408,26 @@ class Parser:
             return ("val", ERRORS.get(tok.upper(), XLError(tok.upper())))
         if kind in ("ref", "cols", "rows"):
             return ("ref",) + parse_ref(kind, tok)
+        if kind == "table":      # structured reference: Table1[Col], Table1[#All], [@Col]…
+            return ("table", tok)
+        if kind == "ext":        # another workbook: '[Book2.xlsx]Sheet1'!A1 or [1]Sheet1!A1
+            return ("ext", tok)
+        if kind == "spillref":   # A1# = the whole block spilled by A1's formula
+            sheet, r1, c1, _, _ = parse_ref("ref", tok[:-1])
+            return ("spillref", sheet, r1, c1)
+        if kind == "array":      # {1,2;3,4}
+            rows = []
+            for part in tok[1:-1].split(";"):
+                row = []
+                for item in part.split(","):
+                    sub = Parser(item.strip()).unary() if item.strip() else ("val", None)
+                    if sub[0] == "neg":
+                        sub = ("val", -sub[1][1])
+                    if sub[0] != "val":
+                        raise FormulaError(VALUE)
+                    row.append(sub[1])
+                rows.append(row)
+            return ("val", Array(rows))
         if kind == "func":
             name = re.sub(r"^_xl(fn|ws)\.", "", tok, flags=re.I).upper()
             self.expect("(")
@@ -311,10 +443,18 @@ class Parser:
                         continue
                     break
             self.expect(")")
-            return ("call", name, args)
+            node = ("call", name, args)
+            while self.peek() == ("op", "("):     # LAMBDA(x, x*2)(5): call what the expression gives
+                node = ("apply", node, self.call_args())
+            return node
         if (kind, tok) == ("op", "("):
             node = self.compare()
             self.expect(")")
+            return node
+        if kind == "name":   # a defined name (named range), looked up when calculating
+            node = ("name", tok)
+            while self.peek() == ("op", "("):     # a name holding a LAMBDA, called like a function
+                node = ("apply", node, self.call_args())
             return node
         raise FormulaError(NAME)
 
@@ -422,6 +562,8 @@ def compare(a, b):
 class Range:
     def __init__(self, eng, sheet, r1, c1, r2, c2):
         s = eng.book[sheet]
+        if eng.stack:   # the formula being calculated depends on this whole block (also cells added later)
+            eng.range_deps.setdefault(eng.stack[-1], set()).add((sheet, r1, c1, r2, c2))
         if r2 >= MAXR - 1:   # whole column: stop at the data
             r2 = max(len(s.rows) - 1, r1)
         if c2 >= MAXC - 1:   # whole row
@@ -443,6 +585,46 @@ class Range:
         raise FormulaError(VALUE)
 
 
+class Array(Range):
+    """A calculated block of values (SEQUENCE, FILTER, SORT…): works wherever a range does and
+    spills into the cells below / right of its formula."""
+
+    def __init__(self, rows):
+        rows = [list(r) for r in rows] or [[]]
+        width = max((len(r) for r in rows), default=0)
+        self.rows = [r + [NA] * (width - len(r)) for r in rows]
+        self.h, self.w = len(self.rows), width
+        self.eng = self.sheet = None
+        self.r1 = self.c1 = 0
+        self.r2, self.c2 = self.h - 1, self.w - 1
+
+    def at(self, i, j):
+        return self.rows[i][j]
+
+
+class Lambda:
+    """LAMBDA(params…, body): a formula you can call; names in scope when it was made are kept."""
+
+    def __init__(self, params, body, scope):
+        self.params, self.body, self.scope = params, body, scope
+
+    def __repr__(self):
+        return "#LAMBDA"
+
+
+def as_rows(v):
+    """Any value / range / array -> list of rows of values."""
+    if isinstance(v, Range):
+        return [[v.at(i, j) for j in range(v.w)] for i in range(v.h)]
+    return [[v]]
+
+
+VOLATILE = re.compile(r"\b(NOW|TODAY|RAND|RANDBETWEEN|RANDARRAY|OFFSET|INDIRECT|CELL|INFO)\s*\(|\[", re.I)
+ARRAY_FUNCS = re.compile(r"\b(SEQUENCE|FILTER|UNIQUE|SORT|SORTBY|TRANSPOSE|RANDARRAY|TEXTSPLIT|VSTACK|HSTACK|"
+                         r"TOCOL|TOROW|TAKE|DROP|CHOOSECOLS|CHOOSEROWS|WRAPROWS|WRAPCOLS|MMULT|FREQUENCY)\s*\(|"
+                         r"^=\s*[^(),\"]*:[^(),\"]*$|[-+*/^&]\s*\$?[A-Za-z]{1,3}\$?\d+:", re.I)
+
+
 # ---------- engine ----------
 
 class Engine:
@@ -450,15 +632,140 @@ class Engine:
         self.book, self.names, self.ids = {}, {}, {}
         self.memo, self.busy, self.asts = {}, set(), {}
         self.too_deep = False
+        self.defined = {}   # defined names: lower-case name -> reference text ("Sheet1!$A$1:$B$5")
+        self.stack = []     # (sheet, r, c) of the cells being calculated, innermost last
+        self.iterate = None         # (max iterations, max change) when circular references may iterate
+        self.prev = {}              # last iteration's values of cells in a cycle
+        self.cycle = False
+        self.array_cells = None     # {(sheet, r, c)} formulas that may spill; None = scan the book again
+        self.spill = None           # {(sheet, r, c): value} cells filled by spilling formulas (None = not built)
+        self.spill_size = {}        # anchor (sheet, r, c) -> (h, w) of its spilled block
+        self.building = False
+        self.tables = {}            # lower-case Excel table name -> {"sheet", "range", "columns", "header", "totals"}
+        self.externals = None       # fn(reference text) -> value / Array for links to other workbooks
+        self.deps = {}              # formula cell -> {cells it read}
+        self.range_deps = {}        # formula cell -> {(sheet, r1, c1, r2, c2) blocks it read}
+        self.volatile = set()       # formula cells using NOW / RAND / OFFSET / INDIRECT…: always recalculated
+        self.env = []               # LET / LAMBDA names in scope: [{lower-case name: value}], innermost last
+
+    def set_iteration(self, props):
+        """Iterative calculation (File settings): circular references are calculated over and over."""
+        props = props or {}
+        self.iterate = (int(props.get("iterate_count", 100)), float(props.get("iterate_delta", 0.001))) \
+            if props.get("iterate") else None
+        self.clear()
+
+    def set_tables(self, tables):
+        self.tables = {t["name"].lower(): t for t in tables}
+        self.clear()
+
+    def note(self, sheet, r, c, text):
+        """A cell's text changed: keep the list of possibly spilling formulas up to date."""
+        if self.array_cells is None:
+            return
+        name = self.ids.get(id(sheet))
+        key = (name, r, c)
+        if text and text[0] == "=" and ARRAY_FUNCS.search(text):
+            self.array_cells.add(key)
+        else:
+            self.array_cells.discard(key)
+
+    def rescan(self):
+        self.array_cells = None
+
+    def ensure_spill(self):
+        """Calculate every possibly-spilling formula so the cells they fill are known."""
+        if self.spill is not None or self.building:
+            return
+        if self.array_cells is None:
+            self.array_cells = {(name, r, c) for name, s in self.book.items() for r, row in enumerate(s.rows)
+                                for c, t in enumerate(row) if t[:1] == "=" and ARRAY_FUNCS.search(t)}
+        self.building = True
+        self.spill, self.spill_size = {}, {}
+        try:
+            for key in sorted(self.array_cells):
+                self.cell(*key)
+        finally:
+            self.building = False
+
+    def spilled(self, sheet_obj, r, c):
+        """Text shown in an empty cell that a dynamic-array formula spills into (None if none)."""
+        if not self.array_cells and self.array_cells is not None:
+            return None
+        self.ensure_spill()
+        name = self.ids.get(id(sheet_obj))
+        v = self.spill.get((name, r, c)) if self.spill else None
+        if v is None:
+            return None
+        return text(v) if not isinstance(v, XLError) else str(v)
+
+    def _spill(self, key, arr):
+        """Anchor `key` returned a block: fill the empty cells it covers, or #SPILL! if one isn't empty."""
+        sheet, r, c = key
+        rows = self.book[sheet].rows
+        for i in range(arr.h):
+            for j in range(arr.w):
+                if (i or j) and r + i < len(rows) and c + j < len(rows[r + i]) and rows[r + i][c + j] != "":
+                    return SPILL
+        if self.spill is None:
+            self.spill = {}
+        for i in range(arr.h):
+            for j in range(arr.w):
+                if i or j:
+                    self.spill[(sheet, r + i, c + j)] = arr.at(i, j)
+        self.spill_size[key] = (arr.h, arr.w)
+        v = arr.at(0, 0)
+        return 0.0 if v is None else v
+
+    def set_names(self, names):
+        self.defined = {n.lower(): t for n, t in (names or {}).items()}
+        self.clear()
 
     def set_book(self, book):
         self.book = book
         self.names = {n.lower(): n for n in book}
         self.ids = {id(s): n for n, s in book.items()}
+        self.array_cells = None
         self.clear()
 
     def clear(self):
         self.memo = {}
+        self.spill = None
+        self.deps, self.range_deps, self.volatile = {}, {}, set()
+
+    def invalidate(self, cells):
+        """Some cells' texts changed: forget the results of exactly those cells and every formula that
+        (directly or through others) reads them. Falls back to recalculating everything when that is
+        simpler (spilling formulas, iterative calculation)."""
+        if self.iterate or self.array_cells or self.too_deep:
+            self.clear()
+            return None
+        rev = {}
+        for f, ps in self.deps.items():
+            for p in ps:
+                rev.setdefault(p, set()).add(f)
+        by_sheet = {}
+        for f, blocks in self.range_deps.items():
+            for b in blocks:
+                by_sheet.setdefault(b[0], []).append((b, f))
+        todo = list(cells) + list(self.volatile)
+        seen = set(todo)
+        while todo:
+            k = todo.pop()
+            nxt = set(rev.get(k, ()))
+            sheet, r, c = k
+            for (_, r1, c1, r2, c2), f in by_sheet.get(sheet, ()):
+                if r1 <= r <= r2 and c1 <= c <= c2:
+                    nxt.add(f)
+            for f in nxt - seen:
+                seen.add(f)
+                todo.append(f)
+        for k in seen:
+            self.memo.pop(k, None)
+            self.deps.pop(k, None)
+            self.range_deps.pop(k, None)
+            self.volatile.discard(k)
+        return seen
 
     def display(self, sheet_obj, r, c):
         """Text to show for a formula cell."""
@@ -466,7 +773,18 @@ class Engine:
         if name is None:
             return ""
         self.too_deep = False
+        self.cycle = False
         v = self.cell(name, r, c)
+        if self.cycle and self.iterate:     # circular: iterate until the values settle
+            count, delta = self.iterate
+            for _ in range(count):
+                cur = {k: x for k, x in self.memo.items() if isinstance(x, (int, float)) and not isinstance(x, bool)}
+                change = max((abs(x - self.prev.get(k, 0.0)) for k, x in cur.items()), default=0.0)
+                self.prev.update(cur)
+                if change < delta:
+                    break
+                self.memo = {}
+                v = self.cell(name, r, c)
         if self.too_deep:   # long chain (e.g. running totals): calculate top-down, then retry
             self.memo = {}
             for rr in range(r + 1):
@@ -480,24 +798,40 @@ class Engine:
 
     def cell(self, sheet, r, c):
         key = (sheet, r, c)
+        if self.stack and self.stack[-1] != key:      # the formula being calculated reads this cell
+            self.deps.setdefault(self.stack[-1], set()).add(key)
         if key in self.memo:
             return self.memo[key]
         rows = self.book[sheet].rows
         t = rows[r][c] if r < len(rows) and c < len(rows[r]) else ""
         if len(t) > 1 and t[0] == "=":
             if key in self.busy:
+                if self.iterate:
+                    self.cycle = True
+                    return self.prev.get(key, 0.0)
                 return CIRC
             self.busy.add(key)
+            self.deps.pop(key, None)
+            self.range_deps.pop(key, None)
+            if VOLATILE.search(t):
+                self.volatile.add(key)
+            self.stack.append(key)    # the cell being calculated (ROW() / COLUMN() without arguments)
             try:
-                v = self.evaluate(t, sheet)
+                v = self.evaluate(t, sheet, spill=True)
+                if isinstance(v, Range):
+                    v = self._spill(key, v)
             finally:
                 self.busy.discard(key)
+                self.stack.pop()
+        elif t == "" and self.array_cells != set():
+            self.ensure_spill()
+            v = self.spill.get(key) if self.spill else None
         else:
             v = literal(t)
         self.memo[key] = v
         return v
 
-    def evaluate(self, formula, sheet):
+    def evaluate(self, formula, sheet, spill=False):
         try:
             ast = self.asts.get(formula)
             if ast is None:
@@ -506,7 +840,11 @@ class Engine:
                 ast = self.asts[formula] = Parser(formula[1:]).parse()
             v = self.ev(ast, sheet)
             if isinstance(v, Range):
+                if spill and (v.h > 1 or v.w > 1):
+                    return v                    # a block: the cell spills it (Engine.cell)
                 v = v.scalar()
+            if isinstance(v, Lambda):        # a LAMBDA that wasn't called
+                return CALC
             if v is None or v is MISSING:
                 return 0.0
             if isinstance(v, float) and not math.isfinite(v):
@@ -534,6 +872,34 @@ class Engine:
             return node[1]
         if kind == "missing":
             return MISSING
+        if kind == "table":
+            return self.table_ref(node[1], sheet)
+        if kind == "ext":
+            if self.externals is None:
+                raise FormulaError(REF)
+            return self.externals(node[1])
+        if kind == "spillref":
+            _, name, r, c = node
+            name = self.sheet_name(name, sheet)
+            self.cell(name, r, c)
+            h, w = self.spill_size.get((name, r, c), (1, 1))
+            return Range(self, name, r, c, r + h - 1, c + w - 1)
+        if kind == "apply":                       # (expression)(args): a LAMBDA called on the spot
+            return self.call_lambda(self.ev(node[1], sheet), node[2], sheet)
+        if kind == "name":
+            low = node[1].lower()
+            for scope in reversed(self.env):      # LET / LAMBDA names first
+                if low in scope:
+                    return scope[low]
+            text = self.defined.get(low)
+            if text is None and node[1].lower() in self.tables:   # a table's name = its data
+                return self.table_ref(node[1] + "[]", sheet)
+            if text is None:
+                raise FormulaError(NAME)
+            target = self.asts.get("name:" + text)
+            if target is None:
+                target = self.asts["name:" + text] = Parser(text.lstrip("=")).parse()
+            return self.ev(target, sheet)
         if kind == "ref":
             _, name, r1, c1, r2, c2 = node
             name = self.sheet_name(name, sheet)
@@ -549,15 +915,119 @@ class Engine:
             return self.binop(node[1], self.ev(node[2], sheet), self.ev(node[3], sheet))
         if kind == "call":
             f = FUNCS.get(node[1])
-            if f is None:
+            if f is None:                         # a name holding a LAMBDA (LET name or defined name)
+                low = node[1].lower()
+                target = next((s[low] for s in reversed(self.env) if low in s), None)
+                if target is None and low in self.defined:
+                    target = self.ev(("name", node[1]), sheet)
+                if isinstance(target, Lambda):
+                    return self.call_lambda(target, node[2], sheet)
                 raise FormulaError(NAME)
             func, lazy = f
+            if lazy == "raw":   # gets the argument expressions themselves (ROW, COLUMN, OFFSET)
+                return func(self, node[2], sheet)
             if lazy:
                 return func(self, [(lambda n=n: self.ev(n, sheet)) for n in node[2]])
             return func(self, [self.ev(n, sheet) for n in node[2]])
         raise FormulaError(NAME)
 
+    def call_lambda(self, fn, arg_nodes, sheet, values=None):
+        """Run a LAMBDA with argument expressions (or already calculated `values`)."""
+        if not isinstance(fn, Lambda):
+            raise FormulaError(VALUE)
+        args = values if values is not None else [self.ev(n, sheet) for n in arg_nodes]
+        if len(args) != len(fn.params):
+            raise FormulaError(VALUE)
+        scope = dict(fn.scope)
+        scope.update(zip(fn.params, args))
+        self.env.append(scope)
+        try:
+            return self.ev(fn.body, sheet)
+        finally:
+            self.env.pop()
+
+    def table_ref(self, tok, sheet):
+        """Structured reference -> Range. Tables come from the file (Sheet.extra['tables'])."""
+        name, _, inner = tok.partition("[")
+        inner = "[" + inner
+        if name:
+            t = self.tables.get(name.lower())
+        else:                                     # [@Col] inside a table: the table holding this cell
+            here = self.stack[-1] if self.stack else None
+            t = next((t for t in self.tables.values() if here and t["sheet"] == here[0]
+                      and t["range"][0] <= here[1] <= t["range"][2] and t["range"][1] <= here[2] <= t["range"][3]), None)
+        if t is None:
+            raise FormulaError(REF)
+        r1, c1, r2, c2 = t["range"]
+        head = r1 + 1 if t["header"] else r1          # first data row
+        tail = r2 - 1 if t["totals"] else r2          # last data row
+        body = inner[1:-1].strip()
+        items = re.findall(r"\[([^\[\]]*)\]", body) if body.startswith("[") else ([body] if body else [])
+        rows, cols, this_row = (head, tail), (c1, c2), False
+        col_names = [n.lower() for n in t["columns"]]
+        picked = []
+        for it in items:
+            it = it.strip()
+            low = it.lower()
+            if low == "#all":
+                rows = (r1, r2)
+            elif low == "#data":
+                rows = (head, tail)
+            elif low == "#headers":
+                rows = (r1, r1)
+            elif low == "#totals":
+                rows = (r2, r2)
+            elif low == "#this row" or it.startswith("@"):
+                this_row = True
+                it = it[1:].strip()
+                if it:
+                    picked.append(it)
+            elif it:
+                picked.append(it)
+        if picked:
+            idx = []
+            for p in picked:
+                p = p.replace("'", "") if "'" in p else p
+                if p.lower() not in col_names:
+                    raise FormulaError(REF)
+                idx.append(c1 + col_names.index(p.lower()))
+            cols = (min(idx), max(idx))
+        if this_row:
+            if not self.stack:
+                raise FormulaError(VALUE)
+            r = self.stack[-1][1]
+            rows = (r, r)
+        if cols[0] == cols[1] and rows[0] == rows[1]:
+            return self.cell(t["sheet"], rows[0], cols[0])
+        return Range(self, t["sheet"], rows[0], cols[0], rows[1], cols[1])
+
     def binop(self, op, a, b):
+        big = lambda v: isinstance(v, Range) and (v.h > 1 or v.w > 1)   # noqa: E731
+        if big(a) or big(b):              # a block with a value / another block: element by element
+            ra, rb = as_rows(a), as_rows(b)
+            h, w = max(len(ra), len(rb)), max(len(ra[0]), len(rb[0]))
+
+            def pick(rows, i, j):
+                if len(rows) == 1:
+                    i = 0
+                if len(rows[0]) == 1:
+                    j = 0
+                return rows[i][j] if i < len(rows) and j < len(rows[i]) else NA
+
+            out = []
+            for i in range(h):
+                row = []
+                for j in range(w):
+                    try:
+                        row.append(self.binop(op, pick(ra, i, j), pick(rb, i, j)))
+                    except FormulaError as e:
+                        row.append(e.err)
+                out.append(row)
+            return Array(out)
+        if isinstance(a, XLError):
+            raise FormulaError(a)
+        if isinstance(b, XLError):
+            raise FormulaError(b)
         if isinstance(a, Range):
             a = a.scalar()
         if isinstance(b, Range):
@@ -586,7 +1056,7 @@ class Engine:
             try:
                 r = math.pow(x, y)
             except (ValueError, OverflowError):
-                raise FormulaError(NUM)
+                raise FormulaError(NUM) from None
             return r
         raise FormulaError(NAME)
 
@@ -1250,3 +1720,9 @@ def _xlookup(e, a):
             return a[3]
         raise FormulaError(NA)
     return out.at(k, 0) if keys.w == 1 else out.at(0, k)   # vertical or horizontal lookup
+
+
+# more functions (finance, statistics, dates, references...) register themselves into FUNCS
+import functions_array  # noqa: E402,F401
+import functions_extra  # noqa: E402,F401
+import functions_lambda  # noqa: E402,F401

@@ -59,7 +59,7 @@ def test_autofit_is_saved(app, tmp_path):
 
 def test_width_inside_a_column_group(app, tmp_path):
     path = workbooks.hidden(tmp_path / "h.xlsx")          # E:G share one dimension (width 15)
-    g = open_in(app, path)
+    open_in(app, path)
     app.set_width(5, 30)                                    # only F
     assert app.save(), app.dialogs
     ws = openpyxl.load_workbook(path)["H"]
@@ -70,7 +70,7 @@ def test_width_inside_a_column_group(app, tmp_path):
 
 def test_width_after_inserting_columns(app, tmp_path):
     path = workbooks.layout(tmp_path / "m.xlsx")           # column C width 20
-    g = open_in(app, path)
+    open_in(app, path)
     app.restructure("col", 0, 1)                            # C moves to D (sheet rebuilt on save)
     app.set_width(1, 25)                                    # new width for (now) B
     assert app.save(), app.dialogs
@@ -80,7 +80,7 @@ def test_width_after_inserting_columns(app, tmp_path):
 
 def test_reset_width_to_default(app, tmp_path):
     path = workbooks.layout(tmp_path / "m.xlsx")
-    g = open_in(app, path)
+    open_in(app, path)
     app.set_width(2, None)                                  # column C back to default
     assert app.save(), app.dialogs
     assert 2 not in io.load(str(path))["Main"].widths

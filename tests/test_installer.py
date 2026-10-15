@@ -43,7 +43,7 @@ def test_install_registers_open_with(inst, tmp_path):
     assert os.path.exists(exe)
     for ext in inst.EXTS:
         assert read(f"Classes\\{ext}\\OpenWithProgids", inst.PROGID) == ""        # listed in "Open with"
-        assert read(f"Classes\\Applications\\SimpleSheets.exe\\SupportedTypes", ext) == ""
+        assert read("Classes\\Applications\\SimpleSheets.exe\\SupportedTypes", ext) == ""
     assert read(f"Classes\\{inst.PROGID}\\shell\\open\\command") == f'"{exe}" "%1"'
     assert read(r"Classes\Applications\SimpleSheets.exe", "FriendlyAppName") == "Simple Sheets"
     un = r"Microsoft\Windows\CurrentVersion\Uninstall\SimpleSheets"
@@ -80,3 +80,28 @@ def test_reinstall_over_existing(inst, tmp_path):
 def test_app_window_icon_is_bundled():
     import simple_sheets
     assert os.path.exists(simple_sheets.resource("assets", "simple_sheets.ico"))
+
+
+def test_new_setup_removes_old_version(inst, tmp_path, monkeypatch):
+    old_dir = str(tmp_path / "old place")
+    inst.install(old_dir, base=BASE, shortcuts=False)
+    with open(os.path.join(old_dir, "stale.txt"), "w") as f:      # a file only the old version had
+        f.write("x")
+    inst._set(r"Microsoft\Windows\CurrentVersion\Uninstall\SimpleSheets", "DisplayVersion", "0.9.0", BASE)
+    assert inst.existing(BASE) == {"dir": old_dir, "version": "0.9.0"}
+    new_dir = str(tmp_path / "new place")
+    inst.install(new_dir, base=BASE, shortcuts=False)
+    assert not os.path.exists(old_dir)                              # old version removed first
+    assert os.path.exists(os.path.join(new_dir, "SimpleSheets.exe"))
+    assert inst.existing(BASE) == {"dir": new_dir, "version": inst.APP_VERSION}
+    inst.install(new_dir, base=BASE, shortcuts=False)              # same folder again: fine
+    assert os.path.exists(os.path.join(new_dir, "SimpleSheets.exe"))
+
+
+def test_running_old_version_blocks_install(inst, tmp_path, monkeypatch):
+    d = str(tmp_path / "app")
+    inst.install(d, base=BASE, shortcuts=False)
+    monkeypatch.setattr(inst, "in_use", lambda folder: True)
+    with pytest.raises(PermissionError):
+        inst.install(str(tmp_path / "other"), base=BASE, shortcuts=False)
+    assert os.path.exists(os.path.join(d, "SimpleSheets.exe"))     # nothing removed

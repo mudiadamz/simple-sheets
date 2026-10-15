@@ -70,6 +70,33 @@ def test_links_move_with_inserted_rows(app, tmp_path):
     assert g.sheet.links[(2, 1)] == "https://example.com/page3"
 
 
+def test_insert_edit_remove_link(app, tmp_path, monkeypatch):
+    import simple_sheets
+    dst = tmp_path / "k.xlsx"
+    monkeypatch.setattr(simple_sheets.filedialog, "asksaveasfilename", lambda **k: str(dst))
+    g = app.table
+    g.goto(0, 0)
+    key(app, "<Control-k>")
+    d = [w for w in app.winfo_children() if type(w).__name__ == "LinkDialog"][0]
+    d.text.insert(0, "Docs")
+    d.url.insert(0, "docs.example.com")
+    d.ok()
+    assert g.text(0, 0) == "Docs" and g.sheet.links[(0, 0)] == "https://docs.example.com"
+    assert g.style(0, 0) == {"fg": "#0563c1", "underline": True}          # looks like a link
+    app.undo()                                                              # one step
+    assert g.text(0, 0) == "" and (0, 0) not in g.sheet.links and not g.style(0, 0)
+    app.redo()
+    app.set_link(1, 0, "mail me", "mailto:a@b.com")
+    assert app.save(), app.dialogs
+    ws = openpyxl.load_workbook(dst).active
+    assert ws["A1"].hyperlink.target == "https://docs.example.com" and ws["A1"].value == "Docs"
+    assert ws["A2"].hyperlink.target == "mailto:a@b.com"
+    app.set_link(0, 0, "Docs", None)                                        # remove
+    assert (0, 0) not in g.sheet.links and not g.style(0, 0)
+    assert app.save(), app.dialogs
+    assert openpyxl.load_workbook(dst).active["A1"].hyperlink is None
+
+
 def test_untouched_links_are_kept(app, tmp_path):
     path = workbooks.links(tmp_path / "l.xlsx")
     open_in(app, path)

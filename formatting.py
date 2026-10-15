@@ -9,6 +9,10 @@ NUMBER = re.compile(r"-?(0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?")
 ISO_DATE = re.compile(r"\d{4}-\d\d-\d\d([ T]\d\d:\d\d(:\d\d(\.\d+)?)?)?")
 EPOCH = dt.datetime(1899, 12, 30)  # Excel day 0
 DEFAULT_SIZE = 11.0                # Excel's default font size (pt)
+DEFAULT_FONT = "Calibri"           # Excel's default font (cells in it aren't given a "font" key)
+# cell borders: style["border"] = {side: [line style, "#rrggbb"]}, sides from this list
+SIDES = ("left", "right", "top", "bottom")
+BORDER_STYLES = ("thin", "medium", "thick", "dashed", "dotted", "double")
 
 # text-style presets: font keys only, other formatting (fill, align, number format) is kept
 FONT_KEYS = ("bold", "italic", "underline", "strike", "size", "fg")
@@ -18,6 +22,33 @@ PRESETS = {
     "Heading 2": {"size": 13.0, "bold": True},
     "Paragraph": {},
     "Caption": {"size": 9.0, "italic": True, "fg": "#595959"},
+}
+
+
+def _box(color, style="thin"):
+    return {s: [style, color] for s in ("left", "right", "top", "bottom")}
+
+
+# Excel's built-in cell styles, applied as plain formatting (Format bar → Styles)
+CELL_STYLES = {
+    "Normal": {},
+    "Good": {"bg": "#c6efce", "fg": "#006100"},
+    "Bad": {"bg": "#ffc7ce", "fg": "#9c0006"},
+    "Neutral": {"bg": "#ffeb9c", "fg": "#9c5700"},
+    "Calculation": {"bg": "#f2f2f2", "fg": "#fa7d00", "bold": True, "border": _box("#7f7f7f")},
+    "Check Cell": {"bg": "#a5a5a5", "fg": "#ffffff", "bold": True, "border": _box("#3f3f3f", "double")},
+    "Explanatory Text": {"fg": "#7f7f7f", "italic": True},
+    "Input": {"bg": "#ffcc99", "fg": "#3f3f76", "border": _box("#7f7f7f")},
+    "Linked Cell": {"fg": "#fa7d00", "border": {"bottom": ["double", "#ff8001"]}},
+    "Note": {"bg": "#ffffcc", "border": _box("#b2b2b2")},
+    "Output": {"bg": "#f2f2f2", "fg": "#3f3f3f", "bold": True, "border": _box("#3f3f3f")},
+    "Warning Text": {"fg": "#ff0000"},
+    "Title": {"size": 18.0, "bold": True, "fg": "#44546a"},
+    "Heading 1": {"size": 15.0, "bold": True, "fg": "#44546a", "border": {"bottom": ["thick", "#4472c4"]}},
+    "Heading 2": {"size": 13.0, "bold": True, "fg": "#44546a", "border": {"bottom": ["thick", "#a2b8e1"]}},
+    "Heading 3": {"bold": True, "fg": "#44546a", "border": {"bottom": ["medium", "#8ea9db"]}},
+    "Heading 4": {"bold": True, "fg": "#44546a"},
+    "Total": {"bold": True, "border": {"top": ["thin", "#4472c4"], "bottom": ["double", "#4472c4"]}},
 }
 
 # default Office theme, in Excel's theme-index order (lt1, dk1, lt2, dk2, accents, links)
@@ -210,6 +241,53 @@ def fmt_number(n, fmt):
     return ("-" + out) if neg and not zero else out
 
 
+NUMBER_FORMATS = [   # (menu label, format code or None for General)
+    ("General", None),
+    ("Number   1,234.56", "#,##0.00"),
+    ("Whole number   1,235", "#,##0"),
+    ("Currency   $1,234.56", '"$"#,##0.00'),
+    ("Percent   12%", "0%"),
+    ("Percent   12.34%", "0.00%"),
+    ("Scientific   1.23E+03", "0.00E+00"),
+    ("Date   2024-03-05", "yyyy-mm-dd"),
+    ("Date   5 Mar 2024", "d mmm yyyy"),
+    ("Long date   Tuesday, March 5, 2024", "dddd, mmmm d, yyyy"),
+    ("Time   2:07 PM", "h:mm AM/PM"),
+    ("Date and time   2024-03-05 14:07", "yyyy-mm-dd hh:mm"),
+    ("Text", "@"),
+]
+
+
+def change_decimals(fmt, delta, sample=""):
+    """Number format with one decimal place more (delta=1) or fewer (-1), like Excel's buttons.
+    General takes the number of decimals the value shows now. Dates / text are left alone."""
+    if not fmt or fmt == "General":
+        n = parse_number(sample) if sample else None
+        if n is None:
+            return fmt
+        dec = len(sample.split(".")[1]) if "." in sample and "e" not in sample.lower() else 0
+        dec = max(dec + delta, 0)
+        return "0" + ("." + "0" * dec if dec else "")
+    sections = _sections(fmt)
+    if fmt == "@" or is_date(sections[0]):
+        return fmt
+    out = []
+    for sec in sections:
+        code = sec
+        cut = re.search(r"[eE][+-]", code)
+        head, tail = (code[:cut.start()], code[cut.start():]) if cut else (code, "")
+        found = list(re.finditer(r"[0#?](?:\.[0#?]*)?", head))   # the number's placeholders
+        if not found:
+            out.append(sec)
+            continue
+        m = found[-1]
+        whole, _, dec = m.group(0).partition(".")
+        dec = "0" * max(len(dec) + delta, 0)
+        new = whole + ("." + dec if dec else "")
+        out.append(head[:m.start()] + new + head[m.end():] + tail)
+    return ";".join(out)
+
+
 def render(text, numfmt):
     """Cell text -> what Excel would show for that number format."""
     if not numfmt or not text or numfmt == "@":
@@ -242,9 +320,9 @@ def theme_colors(xml):
 
 def tint(hex6, t):
     r, g, b = (int(hex6[i:i + 2], 16) / 255 for i in (0, 2, 4))
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    l = l * (1 + t) if t < 0 else l * (1 - t) + t
-    return "#%02x%02x%02x" % tuple(round(x * 255) for x in colorsys.hls_to_rgb(h, l, s))
+    h, light, s = colorsys.rgb_to_hls(r, g, b)
+    light = light * (1 + t) if t < 0 else light * (1 - t) + t
+    return "#%02x%02x%02x" % tuple(round(x * 255) for x in colorsys.hls_to_rgb(h, light, s))
 
 
 def color_hex(color, theme):
@@ -281,7 +359,7 @@ def cell_style(cell, theme, cache):
         arr = getattr(cell, "style_array", None)       # read-only cells
     if arr is None:
         return None                                     # empty read-only cell: no style
-    key = (arr.fontId, arr.fillId, arr.alignmentId, arr.numFmtId)
+    key = (arr.fontId, arr.fillId, arr.alignmentId, arr.numFmtId, arr.borderId, getattr(arr, "protectionId", 0))
     if key in cache:
         return cache[key]
     font, fill = getattr(cell, "font", None), getattr(cell, "fill", None)
@@ -296,20 +374,45 @@ def cell_style(cell, theme, cache):
             st["fg"] = fg
         if font.sz and float(font.sz) != DEFAULT_SIZE:
             st["size"] = float(font.sz)
+        if font.name and font.name != DEFAULT_FONT:
+            st["font"] = font.name
     if getattr(fill, "fill_type", None) == "solid":
         bg = color_hex(fill.fgColor, theme)
         if bg:
             st["bg"] = bg
+    elif getattr(fill, "stop", None):              # a gradient: shown as the average of its colours
+        cols = [color_hex(s.color, theme) for s in (fill.stop or [])]
+        cols = [x for x in cols if x]
+        if cols:
+            st["bg"] = "#%02x%02x%02x" % tuple(round(sum(int(x[i:i + 2], 16) for x in cols) / len(cols))
+                                                for i in (1, 3, 5))
+            st["gradient"] = True
     h = getattr(al, "horizontal", None)
     if h in ("left", "right", "center", "centerContinuous", "justify", "distributed"):
         st["align"] = {"centerContinuous": "center", "distributed": "justify"}.get(h, h)
     if getattr(al, "wrap_text", None):
         st["wrap"] = True
+    if getattr(al, "indent", None):
+        st["indent"] = int(al.indent)
+    rot = getattr(al, "text_rotation", None)
+    if rot:
+        st["rotate"] = 90 - rot if 90 < rot <= 180 else rot   # Excel: 91-180 means 1-90 degrees downwards
     v = getattr(al, "vertical", None)
     if v in ("top", "center", "justify", "distributed"):   # bottom (the default) isn't stored
         st["valign"] = "top" if v == "top" else "center"
     if nf and nf != "General":
         st["numfmt"] = nf
+    border = {}
+    b = getattr(cell, "border", None)
+    for name in SIDES:
+        side = getattr(b, name, None) if b is not None else None
+        if side is not None and side.style:
+            border[name] = [side.style, color_hex(side.color, theme) or "#000000"]
+    if border:
+        st["border"] = border
+    prot = getattr(cell, "protection", None)
+    if prot is not None and prot.locked is False:      # may be edited on a protected sheet
+        st["unlocked"] = True
     cache[key] = st or None
     return cache[key]
 
@@ -319,6 +422,8 @@ def describe(st):
     if not st:
         return "General"
     parts = [st.get("numfmt", "General")]
+    if st.get("font"):
+        parts.append(st["font"])
     if st.get("size"):
         parts.append(f"{st['size']:g}pt")
     parts += [k.capitalize() for k in ("bold", "italic", "underline", "strike") if st.get(k)]
@@ -328,6 +433,8 @@ def describe(st):
         parts.append({"top": "Top", "center": "Middle"}.get(st["valign"], st["valign"]))
     if st.get("wrap"):
         parts.append("Wrap")
+    if st.get("border"):
+        parts.append("Borders")
     if st.get("fg"):
         parts.append(f"Text {st['fg']}")
     if st.get("bg"):

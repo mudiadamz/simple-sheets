@@ -15,7 +15,7 @@ from tkinter import messagebox, ttk
 
 from version import APP_ID, APP_NAME, APP_VERSION, EXE_NAME
 
-EXTS = (".xlsx", ".xlsm", ".xls", ".ods", ".csv", ".tsv")
+EXTS = (".xlsx", ".xlsm", ".xlsb", ".xls", ".ods", ".csv", ".tsv")
 PROGID = f"{APP_ID}.Spreadsheet"
 UNINSTALL_EXE = "Uninstall.exe"
 NO_WINDOW = 0x08000000   # CREATE_NO_WINDOW
@@ -133,8 +133,56 @@ def make_shortcut(lnk, target):
 
 # ---------- install / uninstall ----------
 
+def _get(key_path, name, base="Software"):
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{base}\\{key_path}") as k:
+            return winreg.QueryValueEx(k, name)[0]
+    except OSError:
+        return None
+
+
+def existing(base="Software"):
+    """The installed copy, if any: {'dir', 'version'} (from its Settings > Apps entry)."""
+    un = f"Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_ID}"
+    folder = _get(un, "InstallLocation", base)
+    if not folder:
+        return None
+    return {"dir": folder, "version": _get(un, "DisplayVersion", base) or "?"}
+
+
+def in_use(install_dir):
+    """True if the installed app is running (Windows keeps a running exe open, so it can't be written)."""
+    exe = os.path.join(install_dir, EXE_NAME)
+    if not os.path.exists(exe):
+        return False
+    try:
+        with open(exe, "r+b"):
+            return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def remove_old(base="Software", shortcuts=True):
+    """Uninstall the version that is there now (files, shortcuts, registration) before installing.
+    Returns the old {'dir', 'version'} or None. Raises PermissionError if it's running."""
+    old = existing(base)
+    if old is None:
+        return None
+    if in_use(old["dir"]):
+        raise PermissionError(f"{APP_NAME} is running")
+    uninstall(old["dir"], base, shortcuts=shortcuts, remove_files=True)
+    return old
+
+
 def install(install_dir, open_with=True, start_menu=True, desktop=False, base="Software", shortcuts=True):
-    """Copy the files, register, make shortcuts. Raises PermissionError if the app is running."""
+    """Remove an older installed version, then copy the files, register, make shortcuts.
+    Raises PermissionError if the app is running."""
+    if in_use(install_dir):
+        raise PermissionError(f"{APP_NAME} is running")
+    remove_old(base, shortcuts)
     os.makedirs(install_dir, exist_ok=True)
     shutil.copy2(payload(), os.path.join(install_dir, EXE_NAME))
     me = sys.executable if getattr(sys, "frozen", False) else None
@@ -180,8 +228,13 @@ class SetupWindow(tk.Tk):
         f.pack(fill="both", expand=True)
         ttk.Label(f, text=f"{APP_NAME} {APP_VERSION}", font=("Segoe UI", 14, "bold")).pack(anchor="w")
         ttk.Label(f, text="A light viewer / editor for spreadsheet files.").pack(anchor="w", pady=(0, 12))
+        old = existing()
+        if old:   # an installed version is removed first, then this one goes in (same folder by default)
+            ttk.Label(f, text=f"Version {old['version']} is installed in {old['dir']}.\n"
+                              f"It will be removed first, then {APP_VERSION} installed. Your settings and "
+                              "recent files are kept.", foreground="#1a73e8").pack(anchor="w", pady=(0, 8))
         ttk.Label(f, text="Install folder:").pack(anchor="w")
-        self.dir = tk.StringVar(self, value=default_dir())
+        self.dir = tk.StringVar(self, value=old["dir"] if old else default_dir())
         ttk.Entry(f, textvariable=self.dir, width=60).pack(anchor="w", fill="x", pady=(0, 10))
         self.open_with = tk.BooleanVar(self, value=True)
         self.start_menu = tk.BooleanVar(self, value=True)
@@ -227,8 +280,72 @@ def run_uninstall():
     root.destroy()
 
 
+# ---------- silent (no window) ----------
+
+def parse_args(argv):
+    """Setup.exe /S [/D=folder] [/desktop] [/noopenwith] [/nostartmenu] [/relaunch] (also -S, --silent)."""
+    opts = {"silent": False, "dir": None, "desktop": False, "open_with": True, "start_menu": True, "relaunch": False}
+    for a in argv:
+        low = a.lower()
+        if low in ("/s", "-s", "--silent"):
+            opts["silent"] = True
+        elif low.startswith(("/d=", "--dir=")):
+            opts["dir"] = a.split("=", 1)[1].strip('"')
+        elif low in ("/desktop", "--desktop"):
+            opts["desktop"] = True
+        elif low in ("/noopenwith", "--no-open-with"):
+            opts["open_with"] = False
+        elif low in ("/nostartmenu", "--no-start-menu"):
+            opts["start_menu"] = False
+        elif low in ("/relaunch", "--relaunch"):
+            opts["relaunch"] = True
+    return opts
+
+
+def silent_install(opts, base="Software", shortcuts=True, wait=20.0, log=None):
+    """Install without asking (used by automatic updates). Waits up to `wait` seconds for a running copy
+    to close. Returns 0 on success, 1 on failure (the reason goes to the log file)."""
+    import time
+    old = existing(base)
+    folder = opts.get("dir") or (old["dir"] if old else default_dir())
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            install(folder, opts.get("open_with", True), opts.get("start_menu", True), opts.get("desktop", False),
+                    base, shortcuts)
+            break
+        except PermissionError as e:
+            if time.monotonic() >= deadline:
+                _log(log, f"install failed: {e}")
+                return 1
+            time.sleep(0.5)
+        except Exception as e:
+            _log(log, f"install failed: {e}")
+            return 1
+    _log(log, f"installed {APP_VERSION} in {folder}")
+    if opts.get("relaunch"):
+        subprocess.Popen([os.path.join(folder, EXE_NAME)], close_fds=True)
+    return 0
+
+
+def _log(path, text):
+    import datetime
+    path = path or os.path.join(os.environ.get("TEMP", "."), "SimpleSheets-setup.log")
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} {text}\n")
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
+    args = parse_args(sys.argv[1:])
     if "--uninstall" in sys.argv:
-        run_uninstall()
+        if args["silent"]:
+            uninstall(os.path.dirname(os.path.abspath(sys.executable)))
+        else:
+            run_uninstall()
+    elif args["silent"]:
+        sys.exit(silent_install(args))
     else:
         SetupWindow().mainloop()

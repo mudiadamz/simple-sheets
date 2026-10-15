@@ -11,6 +11,13 @@ def _move(i, at, n):
     return None if i < at - n else i + n
 
 
+def _frozen(count, at, n):
+    """Frozen row/column count after inserting (n > 0) or deleting (n < 0) at `at`."""
+    if n > 0:
+        return count + n if at < count else count
+    return count - len([i for i in range(at, at - n) if i < count])
+
+
 def _span(i1, i2, at, n):
     a, b = _move(i1, at, n), _move(i2, at, n)
     if a is None and b is None:
@@ -59,7 +66,10 @@ def change(book, name, axis, at, n):
         else:
             del s.rows[at:at - n]
         s.heights = _rekey(s.heights, None, at, n)
+        s.outline_rows = _rekey(s.outline_rows, None, at, n)
         s.hidden_rows = {j for j in (_move(i, at, n) for i in s.hidden_rows) if j is not None}
+        s.freeze = (_frozen(s.freeze[0], at, n), s.freeze[1])
+        s.filtered_rows = {j for j in (_move(i, at, n) for i in s.filtered_rows) if j is not None}
         s.rowmap, s.rowtail = _remap(s.rowmap, s.rowtail, at, n)
     else:
         for row in s.rows:
@@ -69,12 +79,26 @@ def change(book, name, axis, at, n):
             else:
                 del row[at:at - n]
         s.widths = _rekey(s.widths, None, at, n)
+        s.outline_cols = _rekey(s.outline_cols, None, at, n)
         s.px = _rekey(s.px, None, at, n)
         s.hidden_cols = {j for j in (_move(i, at, n) for i in s.hidden_cols) if j is not None}
+        s.freeze = (s.freeze[0], _frozen(s.freeze[1], at, n))
         s.colmap, s.coltail = _remap(s.colmap, s.coltail, at, n)
     s.styles = _rekey(s.styles, axis, at, n)
     s.cache = _rekey(s.cache, axis, at, n)
     s.links = _rekey(s.links, axis, at, n)
+    s.rich = _rekey(s.rich, axis, at, n)
+    s.comments = _rekey(s.comments, axis, at, n)
+    s.threads = _rekey(s.threads, axis, at, n)
+    if s.filter:   # the filter range (and its columns' criteria) follow
+        r1, c1, r2, c2 = s.filter["range"]
+        sp = _span(r1, r2, at, n) if axis == "row" else _span(c1, c2, at, n)
+        if sp is None or (axis == "row" and _move(r1, at, n) is None):
+            s.filter, s.filtered_rows = None, set()          # range (or its header row) deleted
+        else:
+            rng = (sp[0], c1, sp[1], c2) if axis == "row" else (r1, sp[0], r2, sp[1])
+            crit = s.filter["criteria"] if axis == "row" else _rekey(s.filter["criteria"], None, at, n)
+            s.filter = {"range": rng, "criteria": crit}
     merges = []
     for r1, c1, r2, c2 in s.merges:
         sp = _span(r1, r2, at, n) if axis == "row" else _span(c1, c2, at, n)
@@ -98,7 +122,8 @@ def change(book, name, axis, at, n):
 
 
 FIELDS = ("rows", "styles", "heights", "widths", "px", "merges", "cache",
-          "rowmap", "rowtail", "colmap", "coltail", "hidden_rows", "hidden_cols", "hidden", "links")
+          "rowmap", "rowtail", "colmap", "coltail", "hidden_rows", "hidden_cols", "hidden", "links", "freeze", "filter",
+          "filtered_rows", "comments", "outline_rows", "outline_cols", "rich", "threads")
 
 
 def _copy(f, v):

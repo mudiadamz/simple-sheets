@@ -58,7 +58,7 @@ def test_edit_undo_redo_save(app, tmp_path):
 
 def test_unsaved_prompt_cancel_keeps_window(app, tmp_path, monkeypatch):
     import simple_sheets
-    g = open_in(app, workbooks.plain(tmp_path / "p.xlsx"))
+    open_in(app, workbooks.plain(tmp_path / "p.xlsx"))
     app.set_cells([(0, 0, "zz")])
     monkeypatch.setattr(simple_sheets.messagebox, "askyesnocancel", lambda *a, **k: None)  # Cancel
     app.on_close()

@@ -2,7 +2,8 @@
 import tkinter as tk
 from tkinter import colorchooser, ttk
 
-from formatting import DEFAULT_SIZE, FONT_KEYS, PRESETS, tint
+from borders import BorderButton
+from formatting import DEFAULT_FONT, DEFAULT_SIZE, FONT_KEYS, NUMBER_FORMATS, PRESETS, change_decimals, tint
 from theme import C
 
 SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36]
@@ -32,12 +33,25 @@ class Tooltip:
         self.tip = tk.Toplevel(self.widget)
         self.tip.wm_overrideredirect(True)
         self.tip.wm_geometry(f"+{x}+{y}")
-        tk.Label(self.tip, text=self.text, bg=C["tooltip_bg"], fg=C["tooltip_fg"], relief="solid", bd=1, padx=4).pack()
+        import i18n
+        tk.Label(self.tip, text=i18n.tr(self.text), bg=C["tooltip_bg"], fg=C["tooltip_fg"], relief="solid", bd=1,
+                 padx=4).pack()
 
     def hide(self, _=None):
         if self.tip:
             self.tip.destroy()
             self.tip = None
+
+
+COMMON_FONTS = ["Calibri", "Arial", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Courier New",
+                "Georgia", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"]
+
+
+def font_choices(widget):
+    """Common fonts that are installed here."""
+    from tkinter import font as tkfont
+    have = {f.lower() for f in tkfont.families(widget)}
+    return [f for f in COMMON_FONTS if f.lower() in have] or [DEFAULT_FONT]
 
 
 VALIGNS = ("top", "center", "bottom")
@@ -121,6 +135,11 @@ class FormatBar(ttk.Frame):
         self.preset.pack(side="left")
         self.preset.bind("<<ComboboxSelected>>", lambda e: self.set_preset())
         Tooltip(self.preset, "Text style")
+        self.font = ttk.Combobox(self, values=font_choices(self), width=14)
+        self.font.pack(side="left", padx=(4, 0))
+        self.font.bind("<<ComboboxSelected>>", lambda e: self.set_font())
+        self.font.bind("<Return>", lambda e: self.set_font())
+        Tooltip(self.font, "Font")
         self.size = ttk.Combobox(self, values=SIZES, width=4)
         self.size.pack(side="left", padx=(4, 0))
         self.size.bind("<<ComboboxSelected>>", lambda e: self.set_size())
@@ -130,7 +149,7 @@ class FormatBar(ttk.Frame):
 
         self.vars = {}
         for key, label, tip in (("bold", "B", "Bold (Ctrl+B)"), ("italic", "I", "Italic (Ctrl+I)"),
-                                ("underline", "U", "Underline (Ctrl+U)")):
+                                ("underline", "U", "Underline (Ctrl+U)"), ("strike", "S", "Strikethrough (Ctrl+5)")):
             v = self.vars[key] = tk.BooleanVar(self)   # explicit master: never another Tk instance
             b = ttk.Checkbutton(self, text=label, variable=v, style=f"{label}.Toolbutton", width=2,
                                 command=lambda k=key: self.toggle(k))
@@ -159,6 +178,19 @@ class FormatBar(ttk.Frame):
                                         self.set_valign, default="bottom")
         self.sep()
 
+        for text, delta, tip in (("⇤", -1, "Decrease indent"), ("⇥", 1, "Increase indent")):
+            b = ttk.Button(self, text=text, style="Toolbutton", width=2, command=lambda d=delta: self.indent(d))
+            b.pack(side="left")
+            Tooltip(b, tip)
+        rot = ttk.Menubutton(self, text="⟲", style="Toolbutton", width=2)
+        rot.pack(side="left")
+        Tooltip(rot, "Rotate text")
+        m = tk.Menu(rot, tearoff=False)
+        for label, deg in (("None", 0), ("Angle up (45°)", 45), ("Angle down (−45°)", -45), ("Up (90°)", 90),
+                           ("Down (−90°)", -90)):
+            m.add_command(label=label, command=lambda d=deg: self.rotate(d))
+        rot["menu"] = m
+        self.rotate_menu = m
         self.wrap = tk.BooleanVar(self)
         img = self.icons["wrap"] = self.wrap_icon()
         b = ttk.Checkbutton(self, image=img, variable=self.wrap, style="Toolbutton", command=self.toggle_wrap)
@@ -170,13 +202,45 @@ class FormatBar(ttk.Frame):
         b = ttk.Checkbutton(self, image=img, variable=self.merged, style="Toolbutton", command=self.toggle_merge)
         b.pack(side="left", padx=(4, 0))
         Tooltip(b, "Merge cells / unmerge")
+        self.borders = BorderButton(self, app)
+        self.borders.button.pack_configure(padx=(4, 0))
+        self.sep()
+
+        nf = ttk.Menubutton(self, text="123", style="Toolbutton")
+        nf.pack(side="left")
+        Tooltip(nf, "Number format")
+        self.numfmt_menu = tk.Menu(nf, tearoff=False)
+        for label, code in NUMBER_FORMATS:
+            self.numfmt_menu.add_command(label=label, command=lambda c=code: self.set_numfmt(c))
+        self.numfmt_menu.add_separator()
+        self.numfmt_menu.add_command(label="Custom…", command=self.custom_numfmt)
+        nf["menu"] = self.numfmt_menu
+        for text, delta, tip in ((".0", -1, "Fewer decimal places"), (".00", 1, "More decimal places")):
+            b = ttk.Button(self, text=text, style="Toolbutton", width=4, command=lambda d=delta: self.decimals(d))
+            b.pack(side="left")
+            Tooltip(b, tip)
         self.sep()
 
         b = ttk.Button(self, text="✕ Clear", style="Toolbutton", command=self.clear)
         b.pack(side="left")
         Tooltip(b, "Clear formatting")
+        # a drawn brush: the 🖌 emoji made Windows load the colour-emoji font (~0.3 s at every start)
+        self.icons["painter"] = self.painter_icon()
+        self.painter_btn = ttk.Button(self, image=self.icons["painter"], style="Toolbutton",
+                                      command=self.app.format_painter)
+        self.painter_btn.pack(side="left")
+        Tooltip(self.painter_btn, "Format painter: copy this formatting, then select where it goes (Esc cancels)")
         self.sep()
         self.table_menu()
+        styles = ttk.Menubutton(self, text="Styles", style="Toolbutton")
+        styles.pack(side="left")
+        Tooltip(styles, "Cell styles (Good, Bad, Heading 1…)")
+        m = tk.Menu(styles, tearoff=False)
+        from formatting import CELL_STYLES
+        for name in CELL_STYLES:
+            m.add_command(label=name, command=lambda n=name: self.cell_style(n))
+        styles["menu"] = m
+        self.styles_menu = m
         self.colors = {"fg": "#000000", "bg": "#ffff00"}   # last used, applied by the icon click
         self.draw_color_icons()
 
@@ -287,6 +351,8 @@ class FormatBar(ttk.Frame):
             self.valign_icon(v, self.icons[f"v-{v}"])
         self.wrap_icon(self.icons["wrap"])
         self.merge_icon(self.icons["merge"])
+        self.painter_icon(self.icons["painter"])
+        self.borders.refresh_icons()
         self.draw_color_icons()
 
     def toggle_wrap(self):
@@ -306,6 +372,16 @@ class FormatBar(ttk.Frame):
         for i in range(3 * k):   # arrow heads
             img.put(dark, to=(3 * k + i, mid - i, 3 * k + i + 1, mid + i + 1))
             img.put(dark, to=(s - 3 * k - i - 1, mid - i, s - 3 * k - i, mid + i + 1))
+        return img
+
+    def painter_icon(self, img=None):
+        """A paint brush: bristles (accent colour), metal band, handle."""
+        s, k = self.px(16), self.px(1)
+        img = self.blank(img, s)
+        ink, tip = C["icon"], C["accent"]
+        img.put(tip, to=(3 * k, k, 13 * k, 6 * k))                 # bristles
+        img.put(ink, to=(3 * k, 6 * k, 13 * k, 8 * k))             # band
+        img.put(ink, to=(7 * k, 8 * k, 9 * k, 15 * k))             # handle
         return img
 
     def toggle_merge(self):
@@ -341,7 +417,7 @@ class FormatBar(ttk.Frame):
             for name, color in TABLE_COLORS.items():
                 img = self.icons[f"table-{name}-{light}"] = self.table_icon(color, light)
                 menu.add_command(label=f"  {name}", image=img, compound="left",
-                                 command=lambda c=color, l=light: self.apply_table(c, l))
+                                 command=lambda c=color, lt=light: self.apply_table(c, lt))
             menu.add_separator()
         menu.add_command(label="Remove table style", command=self.remove_table)
         mb["menu"] = menu
@@ -390,6 +466,7 @@ class FormatBar(ttk.Frame):
         for k, v in self.vars.items():
             v.set(bool(st.get(k)))
         self.align.set(st.get("align", ""))
+        self.font.set(st.get("font", DEFAULT_FONT))
         self.valign.set(st.get("valign", "bottom"))
         self.wrap.set(bool(st.get("wrap")))
         self.size.set(f"{st.get('size', DEFAULT_SIZE):g}")
@@ -424,6 +501,54 @@ class FormatBar(ttk.Frame):
     def set_preset(self):
         p = PRESETS[self.preset.get()]
         self.app.format_cells(lambda st: {**{k: v for k, v in st.items() if k not in FONT_KEYS}, **p})
+        self.done()
+
+    def indent(self, delta):
+        """Indent the text in from the edge (Excel indent levels 0-15)."""
+        self.app.format_cells(lambda st: {**st, "indent": max(0, min(15, int(st.get("indent", 0)) + delta)) or None})
+        self.done()
+
+    def rotate(self, degrees):
+        """Text at an angle (degrees, counter-clockwise); 0 = straight."""
+        self.app.format_cells(lambda st: {**st, "rotate": degrees or None})
+        self.done()
+
+    def cell_style(self, name):
+        """An Excel cell style: replaces the look (fonts, fill, borders), keeps number format and alignment."""
+        from formatting import CELL_STYLES
+        look = CELL_STYLES[name]
+        keep = ("numfmt", "align", "valign", "wrap", "unlocked")
+        self.app.format_cells(lambda st: {**{k: v for k, v in st.items() if k in keep}, **look})
+        self.done()
+
+    def set_numfmt(self, code):
+        self.app.format_cells(lambda st: {**st, "numfmt": code})
+        self.done()
+
+    def custom_numfmt(self):
+        from tkinter import simpledialog
+        g = self.app.table
+        cur = (g.style(*g.cur) or {}).get("numfmt", "General")
+        code = simpledialog.askstring("Number format", "Format code (like Excel), e.g. 0.000  or  #,##0 \"kg\":",
+                                      initialvalue=cur, parent=self)
+        if code:
+            self.set_numfmt(None if code.strip() == "General" else code.strip())
+
+    def decimals(self, delta):
+        """Each selected cell gets one decimal more / fewer (based on its own format and value)."""
+        g = self.app.table
+
+        def fn(st, r, c):
+            new = change_decimals(st.get("numfmt"), delta, g.value(r, c))
+            return {**st, "numfmt": new if new != "General" else None}
+        g.commit()
+        self.app.format_rect(g.cells_rects(), fn)
+        self.done()
+
+    def set_font(self):
+        name = self.font.get().strip()
+        if name:
+            self.app.format_cells(lambda st: {**st, "font": name})
         self.done()
 
     def set_align(self, a):

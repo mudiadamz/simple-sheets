@@ -68,7 +68,6 @@ def test_next_start_remembers_dark(monkeypatch, tmp_path):
 
 
 def test_editor_and_menus_follow_theme(app):
-    import menus
     g = app.table
     app.set_theme(True)
     g.goto(0, 0)

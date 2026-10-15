@@ -5,10 +5,32 @@ import os
 MAX = 8
 
 
+def portable_dir(exe=None):
+    """Portable mode: a 'SimpleSheetsData' folder (or a 'portable.txt' file) next to the program keeps
+    settings, recent files and recovery copies there - nothing in the user profile. -> that folder or None."""
+    import sys
+    if exe is None:
+        if not getattr(sys, "frozen", False):
+            return None
+        exe = sys.executable
+    here = os.path.dirname(os.path.abspath(exe))
+    data = os.path.join(here, "SimpleSheetsData")
+    if os.path.isdir(data) or os.path.exists(os.path.join(here, "portable.txt")):
+        return data
+    return None
+
+
 def config_dir():
     """Where the app keeps its small files (tests point SIMPLE_SHEETS_HOME elsewhere)."""
-    return os.environ.get("SIMPLE_SHEETS_HOME") or os.path.join(
-        os.environ.get("APPDATA") or os.path.expanduser("~"), "SimpleSheets")
+    if os.environ.get("SIMPLE_SHEETS_HOME"):
+        return os.environ["SIMPLE_SHEETS_HOME"]
+    portable = portable_dir()
+    if portable:
+        return portable
+    if os.environ.get("APPDATA"):
+        return os.path.join(os.environ["APPDATA"], "SimpleSheets")
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")   # Linux / macOS
+    return os.path.join(base, "SimpleSheets")
 
 
 def _file():

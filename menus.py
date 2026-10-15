@@ -85,13 +85,20 @@ def show(app, x_root, y_root):
     url = link_at(g, *g.span(*g.cur)[:2])
     if url:
         m.add_command(label="Open link", command=lambda: open_link(url))
-        m.add_separator()
+    has_link = g.span(*g.cur)[:2] in g.sheet.links
+    m.add_command(label="Edit link…" if has_link else "Insert link…", accelerator="Ctrl+K", command=app.edit_link)
+    m.add_separator()
     m.add_command(label="Cut", accelerator="Ctrl+X", image=ic["cut"], command=g.cut, **item)
     m.add_command(label="Copy", accelerator="Ctrl+C", image=ic["copy"], command=g.copy, **item)
     m.add_command(label="Paste", accelerator="Ctrl+V", image=ic["paste"], command=g.paste, **item)
     special = tk.Menu(m, tearoff=False)
     special.add_command(label="Values only", accelerator="Ctrl+Shift+V", command=lambda: g.paste("values"))
     special.add_command(label="Format only", command=lambda: g.paste("format"))
+    special.add_separator()
+    special.add_command(label="Transpose", command=lambda: g.paste(transpose=True))
+    special.add_command(label="Skip blanks", command=lambda: g.paste(skip_blanks=True))
+    for label, op in (("Add", "add"), ("Subtract", "subtract"), ("Multiply", "multiply"), ("Divide", "divide")):
+        special.add_command(label=label, command=lambda op=op: g.paste(op=op))
     m.add_cascade(label="Paste special", menu=special, image=ic["paste"], **item)
     m.add_separator()
 
@@ -121,6 +128,33 @@ def show(app, x_root, y_root):
     m.add_cascade(label="Delete cells", menu=dcells, image=ic["trash"], **item)
     m.add_separator()
 
+    note_cell = g.span(*g.cur)[:2]
+    has_note = note_cell in g.sheet.comments
+    m.add_command(label="Edit comment" if has_note else "Insert comment", command=app.edit_comment)
+    if has_note:
+        m.add_command(label="Delete comment", command=lambda: app.set_comment(*note_cell, ""))
+    m.add_separator()
+
+    import data_tools
+    m.add_command(label="Sort A → Z", command=lambda: data_tools.quick_sort(app, True))
+    m.add_command(label="Sort Z → A", command=lambda: data_tools.quick_sort(app, False))
+    m.add_command(label="Sort range…", command=lambda: data_tools.SortDialog(app))
+    m.add_command(label="Remove filter" if g.sheet.filter else "Create filter",
+                  command=lambda: data_tools.toggle_filter(app))
+    m.add_separator()
+
+    cr, cc = g.cur
+    fz = tk.Menu(m, tearoff=False)
+    fz.add_command(label=f"Up to row {cr + 1}" if cr else "Top row", command=lambda: app.set_freeze(max(cr, 1), g.fc))
+    fz.add_command(label=f"Up to column {col_name(cc)}" if cc else "First column",
+                   command=lambda: app.set_freeze(g.fr, max(cc, 1)))
+    fz.add_command(label=f"Up to cell {col_name(cc)}{cr + 1}", state="normal" if cr and cc else "disabled",
+                   command=lambda: app.set_freeze(cr, cc))
+    fz.add_command(label="Unfreeze", state="normal" if g.fr or g.fc else "disabled",
+                   command=lambda: app.set_freeze(0, 0))
+    m.add_cascade(label="Freeze", menu=fz)
+    m.add_separator()
+
     multi_cell = g.multi() and not (whole_rows and whole_cols)
     in_merge = any(a <= r2 and b >= r1 and c <= c2 and d >= c1 for a, c, b, d in g.sheet.merges)
     m.add_command(label="Merge cells", state="normal" if multi_cell else "disabled", command=app.merge)
@@ -143,6 +177,8 @@ def show(app, x_root, y_root):
                   command=lambda: app.hide("col", False))
     m.add_separator()
     m.add_command(label="Clear contents", accelerator="Delete", command=g.clear)
+    import i18n
+    i18n.translate_menu(m)
     theme.style_menu(m)
     try:
         m.tk_popup(x_root, y_root)

@@ -36,8 +36,18 @@ class SheetTabs(ttk.Frame):
         self.cancel_rename()
         for t in self.nb.tabs():
             self.nb.forget(t)
+        self.swatches = {}
         for name in self.app.visible_sheets():   # hidden sheets get no tab
-            self.nb.add(ttk.Frame(self.nb, height=0), text=name)
+            color = self.app.sheets[name].props.get("tab")
+            lock = "🔒 " if self.app.sheets[name].props.get("protect") else ""
+            if color:   # tab colour: a coloured bar left of the name
+                img = self.swatches.get(color)
+                if img is None:
+                    img = self.swatches[color] = tk.PhotoImage(master=self, width=6, height=14)
+                    img.put(color, to=(0, 0, 6, 14))
+                self.nb.add(ttk.Frame(self.nb, height=0), text=lock + name, image=img, compound="left")
+            else:
+                self.nb.add(ttk.Frame(self.nb, height=0), text=lock + name)
         self.select(self.app.sheet)
 
     def select(self, name):
@@ -46,11 +56,11 @@ class SheetTabs(ttk.Frame):
             self.nb.select(names.index(name))
 
     def names(self):
-        return [self.nb.tab(t, "text") for t in self.nb.tabs()]
+        return [self.nb.tab(t, "text").removeprefix("🔒 ") for t in self.nb.tabs()]
 
     def on_tab(self, _=None):
         if self.nb.select():
-            name = self.nb.tab(self.nb.select(), "text")
+            name = self.nb.tab(self.nb.select(), "text").removeprefix("🔒 ")
             if name != self.app.sheet and name in self.app.sheets:
                 self.app.show(name)
 
@@ -112,6 +122,8 @@ class SheetTabs(ttk.Frame):
 
     def start_rename(self, name):
         """Edit box placed right over the tab's name."""
+        if self.app.sheet_protected(name, "renamed"):
+            return
         self.cancel_rename()
         self.app.show(name)
         self.select(name)
@@ -161,19 +173,38 @@ class SheetTabs(ttk.Frame):
         self.select(name)
         m = tk.Menu(self, tearoff=False)
         m.add_command(label="Add sheet", command=self.app.add_sheet)
-        m.add_command(label="Rename", command=lambda: self.start_rename(name))
+        locked = bool(self.app.sheets[name].props.get("protect"))   # protected: unprotect first
+        m.add_command(label="Rename", command=lambda: self.start_rename(name),
+                      state="disabled" if locked else "normal")
         several = len(self.app.visible_sheets()) > 1
         m.add_command(label="Delete", command=lambda: self.app.delete_sheet(name),
-                      state="normal" if several else "disabled")
+                      state="normal" if several and not locked else "disabled")
         m.add_separator()
         m.add_command(label="Hide", command=lambda: self.app.hide_sheet(name),
-                      state="normal" if several else "disabled")
+                      state="normal" if several and not locked else "disabled")
         hidden = [n for n, s in self.app.sheets.items() if s.hidden]
         unhide = tk.Menu(m, tearoff=False)
         for n in hidden:
             unhide.add_command(label=n, command=lambda n=n: self.app.hide_sheet(n, False))
         m.add_cascade(label="Unhide", menu=unhide, state="normal" if hidden else "disabled")
+        m.add_separator()
+        import workbook_tools as wt
+        m.add_command(label="Duplicate", command=lambda: wt.duplicate_sheet(self.app, name))
+        m.add_command(label="Copy to a new workbook…", command=lambda: wt.copy_to_new_workbook(self.app, name))
+        colors = tk.Menu(m, tearoff=False)
+        for label, c in wt.TAB_COLORS:
+            colors.add_command(label=label, command=lambda c=c: wt.set_tab_color(self.app, name, c))
+        colors.add_command(label="Other…", command=lambda: wt.pick_tab_color(self.app, name))
+        colors.add_separator()
+        colors.add_command(label="No colour", command=lambda: wt.set_tab_color(self.app, name, None))
+        m.add_cascade(label="Tab colour", menu=colors)
+        if self.app.sheets[name].props.get("protect"):
+            m.add_command(label="Unprotect sheet…", command=lambda: wt.unprotect_sheet(self.app))
+        else:
+            m.add_command(label="Protect sheet…", command=lambda: wt.protect_sheet(self.app))
         self.menu = m   # kept for tests
+        import i18n
+        i18n.translate_menu(m)
         theme.style_menu(m)
         try:
             m.tk_popup(e.x_root, e.y_root)

@@ -1,0 +1,19 @@
+# Lint check: `python -m ruff check .` (also run in CI)
+line-length = 130
+src = [".", "tests"]
+target-version = "py311"
+extend-exclude = ["build", "dist", "test_file"]
+
+[lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = [
+    "E731",   # small lambdas assigned to names read well here
+    "B008",   # default argument calls (none worth changing)
+    "B023",   # loop variables in lambdas are bound with default arguments on purpose
+    "E402",   # formula.py imports its function modules at the end (they register themselves)
+    "B905",   # zip() without strict=: lengths differ on purpose (rows of different widths)
+]
+
+[lint.per-file-ignores]
+"menus.py" = ["E702"]   # the icon drawings are one line per shape
+"tests/test_ods.py" = ["E501"]   # the sample file's XML
