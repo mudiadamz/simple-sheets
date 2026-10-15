@@ -92,6 +92,26 @@ def box_of(g, ch):
     return x, y, max(w, g.px(120)), max(h, g.px(80))
 
 
+def nice_scale(lo, hi, ticks=5):
+    """Axis from lo to hi on round steps (1, 2, 2.5, 5 x 10^n): -> (axis lo, axis hi, step)."""
+    import math
+    if hi == lo:
+        hi = lo + 1
+    raw = (hi - lo) / max(ticks - 1, 1)
+    mag = 10 ** math.floor(math.log10(raw))
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+    return math.floor(lo / step) * step, math.ceil(hi / step) * step, step
+
+
+def axis_label(v):
+    """54800 -> '54.8k', 1500000 -> '1.5M', 0.25 -> '0.25'."""
+    a = abs(v)
+    for size, unit in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if a >= size:
+            return f"{v / size:.3g}{unit}"
+    return f"{v:.3g}"
+
+
 def draw_all(g, C):
     g.chart_boxes = []
     sheet = g.sheet
@@ -147,9 +167,7 @@ def draw(cv, x, y, w, h, ch, app, sheet_name, family, C):
         names = cats
     else:
         allv = [v for _, vals in series for v in vals]
-        lo, hi = min(0.0, min(allv)), max(0.0, max(allv))
-        if hi == lo:
-            hi = lo + 1
+        lo, hi, step = nice_scale(min(0.0, min(allv)), max(0.0, max(allv)))
         n = max(len(v) for _, v in series)
         horizontal = ch["kind"] == "bar"
 
@@ -158,14 +176,15 @@ def draw(cv, x, y, w, h, ch, app, sheet_name, family, C):
 
         def vx(v):
             return left + (v - lo) / (hi - lo) * (right - left)
-        for k in range(5):   # gridlines + axis numbers
-            v = lo + (hi - lo) * k / 4
+        for k in range(round((hi - lo) / step) + 1):   # gridlines + axis numbers at round values
+            v = lo + step * k
             if horizontal:
                 cv.create_line(vx(v), top, vx(v), bottom, fill=C["grid_line"], tags=tag)
-                cv.create_text(vx(v), bottom + 8, text=f"{v:.3g}", font=(family, 7), fill=C["muted"], tags=tag)
+                cv.create_text(vx(v), bottom + 8, text=axis_label(v), font=(family, 7), fill=C["muted"], tags=tag)
             else:
                 cv.create_line(left, vy(v), right, vy(v), fill=C["grid_line"], tags=tag)
-                cv.create_text(left - 4, vy(v), text=f"{v:.3g}", anchor="e", font=(family, 7), fill=C["muted"], tags=tag)
+                cv.create_text(left - 4, vy(v), text=axis_label(v), anchor="e", font=(family, 7), fill=C["muted"],
+                               tags=tag)
         slot = ((bottom - top) if horizontal else (right - left)) / max(n, 1)
         for si, (_s, vals) in enumerate(series):
             color = PALETTE[si % len(PALETTE)]
