@@ -59,7 +59,7 @@ def test_font_family(app, tmp_path):
     fb.set_font()
     assert g.style(1, 0)["font"] == "Courier New"
     assert g.font(g.style(1, 0)).actual("family") == "Courier New"     # drawn in that font
-    assert "Courier New" in app.fmt_info["text"]
+    assert "Courier New" in __import__("formatting").describe(app.current.styles.get(app.table.cur))
     assert app.save(), app.dialogs
     ws = openpyxl.load_workbook(path)["Data"]
     assert ws["A2"].font.name == "Courier New"

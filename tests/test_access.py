@@ -29,15 +29,18 @@ def test_view_menu_has_high_contrast(app):
 
 def test_ui_scale_factor(app):
     from tkinter import font as tkfont
-    f = tkfont.nametofont("TkTooltipFont", root=app)
-    before = f.cget("size")
+    fonts = {n: tkfont.nametofont(n, root=app) for n in settings_ui.NAMED_FONTS}
+    sizes = {n: f.cget("size") for n, f in fonts.items()}     # ui_factor scales ALL of them: put them ALL back
+    f, before = fonts["TkTooltipFont"], sizes["TkTooltipFont"]
     settings.set("ui_scale", 150)
     try:
         assert settings_ui.ui_factor(app) == 1.5
         assert abs(f.cget("size")) == round(abs(before) * 1.5) or before == 0
     finally:
-        f.configure(size=before)
+        for n, font in fonts.items():
+            font.configure(size=sizes[n])
         settings.set("ui_scale", 100)
+    assert all(fonts[n].cget("size") == sizes[n] for n in fonts)
     assert settings_ui.ui_factor(app) == 1.0
     settings.set("ui_scale", "huge")
     assert settings_ui.ui_factor(app) == 1.0

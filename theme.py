@@ -1,4 +1,6 @@
 """Light / dark colours for the whole app. `C` always holds the active palette."""
+import colorsys
+import functools
 import sys
 import tkinter as tk
 from tkinter import ttk
@@ -11,6 +13,7 @@ LIGHT = {
     "accent": "#1a73e8", "hidden_mark": "#8a8a8a", "icon": "#333333",
     "field_bg": "#ffffff", "select_bg": "#cce0ff", "menu_bg": "#f9f9f9", "menu_active": "#d3e3fd",
     "tooltip_bg": "#ffffe0", "tooltip_fg": "#000000",
+    "chat_bg": "#f4f6f8", "chat_user": "#dce8fc", "chat_code": "#e6e9ee", "on_accent": "#ffffff",
 }
 DARK = {
     "dark": True,
@@ -20,6 +23,7 @@ DARK = {
     "accent": "#8ab4f8", "hidden_mark": "#9aa0a6", "icon": "#e8eaed",
     "field_bg": "#2b2c2f", "select_bg": "#3c4a63", "menu_bg": "#2b2c2f", "menu_active": "#3c4a63",
     "tooltip_bg": "#3c4043", "tooltip_fg": "#e8eaed",
+    "chat_bg": "#26282c", "chat_user": "#2d3b52", "chat_code": "#34373c", "on_accent": "#202124",
 }
 HIGH = {   # high contrast: white on black, yellow accents, strong lines
     "dark": True, "contrast": True,
@@ -29,18 +33,70 @@ HIGH = {   # high contrast: white on black, yellow accents, strong lines
     "accent": "#ffff00", "hidden_mark": "#ffff00", "icon": "#ffffff",
     "field_bg": "#000000", "select_bg": "#00309c", "menu_bg": "#000000", "menu_active": "#00309c",
     "tooltip_bg": "#000000", "tooltip_fg": "#ffff00",
+    "chat_bg": "#000000", "chat_user": "#00265e", "chat_code": "#1c1c1c", "on_accent": "#000000",
 }
 C = dict(LIGHT)
 LIGHT_THEME = None   # the platform's native ttk theme, remembered on first use
 
 
+LIGHT_FILL = 0.72    # fills lighter than this are shown as a dark shade in dark mode
+
+
+@functools.lru_cache(maxsize=4096)
+def _hls(hex_color):
+    return colorsys.rgb_to_hls(*(int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)))
+
+
+def _hex(h, light, s):
+    return "#%02x%02x%02x" % tuple(round(x * 255) for x in colorsys.hls_to_rgb(h, light, s))
+
+
+def _is_hex(c):
+    return isinstance(c, str) and len(c) == 7 and c.startswith("#")
+
+
+def is_light_fill(bg):
+    return _is_hex(bg) and _hls(bg.lower())[1] > LIGHT_FILL
+
+
+@functools.lru_cache(maxsize=4096)
+def _dark_fill(bg):
+    h, light, s = _hls(bg)
+    return _hex(h, 0.13 + (1 - light) * 0.6, min(s, 0.55))   # white -> deep grey, pale tint -> deep tint
+
+
+@functools.lru_cache(maxsize=4096)
+def _light_text(fg):
+    h, light, s = _hls(fg)
+    return fg if light >= 0.6 else _hex(h, 0.8, min(s, 0.85))
+
+
+def shade(hex_color, k):
+    """A darker (k > 0) or lighter (k < 0) version of a colour."""
+    h, light, s = _hls(hex_color.lower())
+    return _hex(h, max(0.0, min(1.0, light * (1 - k) if k > 0 else light + (1 - light) * -k)), s)
+
+
+def display_fill(bg):
+    """How a cell fill is shown: as it is, except light fills in dark / high-contrast mode (table banding,
+    pale table styles, pastel cards) become a dark shade of the same colour. Display only: files, PDF and
+    printing keep the real colour."""
+    if not bg or not C["dark"] or not is_light_fill(bg):
+        return bg
+    return _dark_fill(bg.lower())
+
+
 def text_color(fg, bg):
-    """Colour for cell text: the cell's own colour, unless it would vanish on a dark empty cell."""
-    if bg:                                   # filled cells keep light-mode contrast
+    """Colour for cell text: the cell's own colour, unless it would vanish. bg is the cell's real fill."""
+    if bg and not (C["dark"] and is_light_fill(bg)):   # a fill shown as it is: keep its light-mode contrast
         return fg or "#000000"
     if not fg:
         return C["cell_fg"]
-    return C["cell_fg"] if C["dark"] and near_black(fg) else fg
+    if not C["dark"]:
+        return fg
+    if bg:                                   # a light fill shown dark: dark text becomes a light shade of itself
+        return C["cell_fg"] if near_black(fg) else (_light_text(fg.lower()) if _is_hex(fg) else fg)
+    return C["cell_fg"] if near_black(fg) else fg
 
 
 def near_black(hex_color):
@@ -91,22 +147,73 @@ def apply(app, dark, contrast=False):
     app.configure(background=C["bg"])
     _recolor(app)
     _title_bar(app, dark)
+    for w in _descendants(app):                  # dialogs already open: their title bars too
+        if w.winfo_class() == "Toplevel" and w.winfo_ismapped():
+            _title_bar(w, dark)
+    install(app)
+
+
+# window / plain-widget backgrounds that are "unset" (not a colour someone chose for that widget)
+_PLAIN_BG = {"systembuttonface", "#f0f0f0", "#d9d9d9"}
+_PLAIN_FG = {"systembuttontext", "systemwindowtext", "black", "#000000"}
+
+
+def _plain(value, extra, keys):
+    """Is this colour a default / one of our palettes' own (so it should follow the theme)?"""
+    v = str(value).lower()
+    return v in extra or v in {p[k].lower() for p in (LIGHT, DARK, HIGH) for k in keys}
 
 
 def _recolor(widget):
-    """Plain tk widgets (menus, canvas, text, tooltips) don't follow ttk themes: set them directly."""
+    """Plain tk widgets (menus, canvas, text, lists, labels, frames in dialogs) don't follow ttk themes: set them
+    directly. Labels / frames keep a colour that was chosen for them (colour swatches, tooltips)."""
     for w in [widget] + _descendants(widget):
+        if getattr(w, "_own_colors", False):        # widgets that colour themselves (the AI chat)
+            continue
         cls = w.winfo_class()
         try:
             if cls == "Menu":
                 w.configure(background=C["menu_bg"], foreground=C["fg"], activebackground=C["menu_active"],
                             activeforeground=C["fg"], disabledforeground=C["muted"], selectcolor=C["fg"])
             elif cls == "Canvas":
-                w.configure(background=C["cell_bg"])
+                if _plain(w.cget("background"), _PLAIN_BG | {"#ffffff", "white"}, ("bg", "cell_bg")):
+                    w.configure(background=C["cell_bg"])
             elif cls == "Text":
                 w.configure(background=C["field_bg"], foreground=C["fg"], insertbackground=C["fg"])
+            elif cls == "Listbox":
+                w.configure(background=C["field_bg"], foreground=C["fg"], selectbackground=C["select_bg"],
+                            selectforeground=C["fg"], highlightbackground=C["header_line"], highlightcolor=C["accent"])
+            elif cls in ("Entry", "Spinbox"):
+                w.configure(background=C["field_bg"], foreground=C["fg"], insertbackground=C["fg"])
+            elif cls in ("Toplevel", "Frame", "Label", "Checkbutton", "Radiobutton", "Button"):
+                if _plain(w.cget("background"), _PLAIN_BG, ("bg",)):
+                    w.configure(background=C["bg"])
+                    if cls != "Toplevel" and cls != "Frame" and _plain(w.cget("foreground"), _PLAIN_FG, ("fg",)):
+                        w.configure(foreground=C["fg"])
+                    if cls in ("Checkbutton", "Radiobutton", "Button"):
+                        w.configure(activebackground=C["menu_active"], activeforeground=C["fg"])
+                    if cls in ("Checkbutton", "Radiobutton"):
+                        w.configure(selectcolor=C["field_bg"])
         except tk.TclError:
             pass
+
+
+def install(app):
+    """Every window, when it appears: dark / high-contrast title bar and the plain widgets recoloured
+    (dialogs, the command palette, pop-ups made after the switch). Bound once."""
+    if getattr(app, "_theme_hooked", False):
+        return
+    app._theme_hooked = True
+
+    def on_map(e):
+        w = e.widget
+        if not isinstance(w, (tk.Tk, tk.Toplevel)):
+            return
+        if C["dark"] or getattr(w, "_dark_title", False):
+            _recolor(w)
+            _title_bar(w, C["dark"], force=True)
+    app.bind_class("Toplevel", "<Map>", on_map, add="+")
+    app.bind("<Map>", on_map, add="+")           # the main window (fires for its children too; filtered)
 
 
 def _descendants(w):
@@ -123,22 +230,32 @@ def style_menu(menu):
     return menu
 
 
-def _title_bar(app, dark):
+def _title_bar(win, dark, force=False):
     """Windows 10/11: dark title bar to match. Done when the window is idle (asking for the window handle
-    right away would force a full layout and slow down opening the window)."""
-    if sys.platform != "win32" or (not dark and not getattr(app, "_dark_title", False)):
+    right away would force a full layout and slow down opening the window). Before the window is shown
+    there is no frame to change yet: the <Map> hook (install) applies it again when it appears."""
+    if sys.platform != "win32" or (not dark and not getattr(win, "_dark_title", False) and not force):
         return                                   # light is the default: nothing to change
-    app._dark_title = dark
-    app.after_idle(lambda: _title_bar_now(app, dark))
+    win._dark_title = dark
+    win._root().after_idle(lambda: _title_bar_now(win, dark))   # on the main window: win may close first
 
 
-def _title_bar_now(app, dark):
+def _title_bar_now(win, dark):
+    """-> True when the frame was changed (False: not shown yet / not Windows)."""
     try:
         import ctypes
-        hwnd = ctypes.windll.user32.GetParent(app.winfo_id())
+        if not win.winfo_exists():
+            return False
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetParent(win.winfo_id())
+        if not hwnd:
+            return False
         value = ctypes.c_int(1 if dark else 0)
         for attr in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (newer / older builds)
             if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
                 break
+        # repaint the frame now (else the old colour stays until the window is moved or refocused)
+        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
+        return True
     except Exception:
-        pass
+        return False

@@ -121,6 +121,113 @@ def change(book, name, axis, at, n):
     return changed
 
 
+# ---------- move whole rows / columns (drag a header) ----------
+
+def mover(a, n, t):
+    """Lines a .. a+n-1 go before line t (t outside the block): -> perm(i) = new index of line i."""
+    if t < a:
+        def perm(i):
+            if a <= i < a + n:
+                return t + i - a
+            return i + n if t <= i < a else i
+    else:
+        def perm(i):
+            if a <= i < a + n:
+                return t - n + i - a
+            return i - n if a + n <= i < t else i
+    perm.span = (min(a, t), max(a + n, t) - 1)   # every line that changes place: ranges covering it all stay
+    return perm
+
+
+def _perm_keys(d, axis, perm):
+    out = {}
+    for k, v in d.items():
+        if isinstance(k, tuple):
+            r, c = k
+            out[(perm(r), c) if axis == "row" else (r, perm(c))] = v
+        else:
+            out[perm(k)] = v
+    return out
+
+
+def _perm_list(items, perm, size, fill):
+    """Reorder a list (padded to `size` with fill()); trailing fills trimmed again."""
+    items = list(items) + [fill() for _ in range(max(size - len(items), 0))]
+    out = [None] * len(items)
+    for i, v in enumerate(items):
+        out[perm(i)] = v
+    while out and out[-1] in ([], ""):
+        out.pop()
+    return out
+
+
+def move(book, name, axis, a, n, t):
+    """Move rows / columns a .. a+n-1 of sheet `name` so they sit before line t (index before the move).
+    Values, formats, sizes, hidden state, comments, links and merged cells move with them; formulas on
+    every sheet follow the moved cells. Returns the changed formula cells. Raises ValueError when a merged
+    block would be split."""
+    from formula import permute
+    if a <= t <= a + n:
+        return []
+    s = book[name]
+    perm = mover(a, n, t)
+    lo, hi = min(a, t), max(a + n, t)
+    for r1, c1, r2, c2 in s.merges:                       # a merged block must move as a whole
+        i1, i2 = (r1, r2) if axis == "row" else (c1, c2)
+        new = sorted(perm(i) for i in range(i1, i2 + 1))
+        if new != list(range(new[0], new[0] + len(new))):
+            raise ValueError("merged cells would be split")
+    size = hi
+    if axis == "row":
+        s.rows = _perm_list(s.rows, perm, size, list)
+        s.heights = _perm_keys(s.heights, None, perm)
+        s.outline_rows = _perm_keys(s.outline_rows, None, perm)
+        s.hidden_rows = {perm(i) for i in s.hidden_rows}
+        s.filtered_rows = {perm(i) for i in s.filtered_rows}
+        m = list(s.rowmap)
+        while len(m) < size:
+            m.append(s.rowtail)
+            s.rowtail += 1
+        s.rowmap = [m[i] for i in sorted(range(len(m)), key=perm)]   # model row -> row on disk, reordered
+    else:
+        for k, row in enumerate(s.rows):
+            if len(row) > lo:
+                s.rows[k] = _perm_list(row, perm, size, str)
+        s.widths = _perm_keys(s.widths, None, perm)
+        s.outline_cols = _perm_keys(s.outline_cols, None, perm)
+        s.px = _perm_keys(s.px, None, perm)
+        s.hidden_cols = {perm(i) for i in s.hidden_cols}
+        m = list(s.colmap)
+        while len(m) < size:
+            m.append(s.coltail)
+            s.coltail += 1
+        s.colmap = [m[i] for i in sorted(range(len(m)), key=perm)]
+        if s.filter:
+            s.filter = {**s.filter, "criteria": _perm_keys(s.filter["criteria"], None, perm)}
+    for f in ("styles", "cache", "links", "rich", "comments", "threads"):
+        setattr(s, f, _perm_keys(getattr(s, f), axis, perm))
+    merges = []
+    for r1, c1, r2, c2 in s.merges:
+        if axis == "row":
+            p1, p2 = sorted((perm(r1), perm(r2)))
+            merges.append((p1, c1, p2, c2))
+        else:
+            p1, p2 = sorted((perm(c1), perm(c2)))
+            merges.append((r1, p1, r2, p2))
+    s.merges = merges
+    s.view = None
+    changed = []
+    for home, sh in book.items():
+        for r, row in enumerate(sh.rows):
+            for c, t_ in enumerate(row):
+                if t_.startswith("=") and len(t_) > 1:
+                    new = permute(t_, home, name, axis, perm)
+                    if new != t_:
+                        row[c] = new
+                        changed.append((home, r, c))
+    return changed
+
+
 FIELDS = ("rows", "styles", "heights", "widths", "px", "merges", "cache",
           "rowmap", "rowtail", "colmap", "coltail", "hidden_rows", "hidden_cols", "hidden", "links", "freeze", "filter",
           "filtered_rows", "comments", "outline_rows", "outline_cols", "rich", "threads")

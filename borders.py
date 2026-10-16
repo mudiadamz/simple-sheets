@@ -155,7 +155,7 @@ class BorderButton:
         self.popup = top
 
     def later_close(self):
-        self.button.after(300, self.close_if_away)
+        self.button._root().after(300, self.close_if_away)
 
     def close_if_away(self):
         if self.popup is None or self.choosing:

@@ -10,7 +10,7 @@ import autocomplete
 from cell_editor import CellEditor
 from formatting import DEFAULT_SIZE, parse_number, render
 from formula import quote_sheet, references, shift
-from theme import C, near_black, text_color
+from theme import C, display_fill, near_black, text_color
 
 ALL = 1 << 20          # bound used for whole-row / whole-column selections
 REF_COLORS = ["#1a73e8", "#d93025", "#9334e6", "#188038", "#e8710a", "#007b83", "#b06000"]
@@ -434,6 +434,47 @@ class Grid(ttk.Frame):
 
     # ---------- selection ----------
 
+    def selected_lines(self):
+        """('col', c1, c2) when whole columns are selected, ('row', r1, r2) for whole rows, else None."""
+        r1, c1, r2, c2 = self.sel()
+        if r1 == 0 and r2 >= ALL and c2 < ALL:
+            return "col", c1, c2
+        if c1 == 0 and c2 >= ALL and r2 < ALL:
+            return "row", r1, r2
+        return None
+
+    def on_selected_header(self, x, y):
+        """Is (x, y) on the header of a selected whole column / row (which can be dragged to move it)?"""
+        lines = self.selected_lines() if not self.extra else None
+        if not lines or (x >= self.hdr_w() and y >= self.hdr_h()):
+            return False
+        r, c = self.hit(x, y)
+        axis, i1, i2 = lines
+        return (axis == "col" and r < 0 <= c and i1 <= c <= i2) or (axis == "row" and c < 0 <= r and i1 <= r <= i2)
+
+    def select_line(self, axis, i1, i2):
+        """Select whole columns (axis 'col') or rows i1 .. i2."""
+        self.extra = []
+        if axis == "col":
+            self.cur, self.anchor, self.ext = (0, i1), (0, i1), (ALL, i2)
+        else:
+            self.cur, self.anchor, self.ext = (i1, 0), (i1, 0), (i2, ALL)
+        self.redraw()
+        self.app.on_select()
+
+    def line_drop(self, axis, x, y):
+        """Where dragged rows / columns would go: the line boundary nearest the mouse (index of the line
+        they'd sit before)."""
+        W, H = self.cv.winfo_width(), self.cv.winfo_height()
+        r, c = self.hit(min(max(x, self.hdr_w() + 1), W - 1), min(max(y, self.hdr_h() + 1), H - 1))
+        if axis == "col":
+            if c < 0:
+                return None
+            return c + 1 if x > self.col_x(c) + self.colw(c) / 2 else c
+        if r < 0:
+            return None
+        return r + 1 if y > self.row_y(r) + self.rh(r) / 2 else r
+
     def sel(self):
         (ar, ac), (er, ec) = self.anchor, self.ext
         return min(ar, er), min(ac, ec), max(ar, er), max(ac, ec)
@@ -661,7 +702,7 @@ class Grid(ttk.Frame):
         rows = list(ys)
         limit = getattr(self.sheet, "loaded_limit", None)
         if limit and rows and len(self.sheet.rows) >= limit and max(rows) >= len(self.sheet.rows) - 30:
-            self.after_idle(self.app.load_more_rows)     # scrolled near the end of a long sheet: read more
+            self._root().after_idle(self.app.load_more_rows)     # scrolled near the end of a long sheet: read more
         cols, x = [], hw
         for c in self.col_seq():
             if x >= W:
@@ -744,6 +785,7 @@ class Grid(ttk.Frame):
         self._layout = self.layout_key()
         self._was_multi = self.multi() or bool(self.ref_marks) or bool(self.fill_preview)
         self.draw_overlay(*self._geom)
+        self.keep_editor_in_place()
 
         total_r = max(len(self.sheet.rows), self.top + len(rows), 1) + EXTRA_ROWS
         total_c = max(self.ncols, self.left + len(cols), 1) + EXTRA_COLS
@@ -874,7 +916,8 @@ class Grid(ttk.Frame):
         if cf:
             bar = cf.pop("bar", None)
             st = {**(st or {}), **cf}
-        bg = st.get("bg") if st else None
+        real_bg = st.get("bg") if st else None
+        bg = display_fill(real_bg)                          # dark mode: light fills shown as a dark shade
         if self.multi() and self.in_selection(r, c) and self.span(*self.cur)[:2] != (r, c):
             bg = blend(bg or C["cell_bg"], C["accent"], 0.15)
         grid = C["grid_line"] if self.sheet.props.get("grid") is not False else (bg or "")
@@ -898,7 +941,7 @@ class Grid(ttk.Frame):
         font = self.font(st)
         pad = self.px(4)
         avail = w - 2 * pad
-        fg = text_color(st.get("fg") if st else None, bg if st and st.get("bg") else None)
+        fg = text_color(st.get("fg") if st else None, real_bg)
         just = "center" if align == "center" else "right" if align == "right" else "left"
         tx = x + w // 2 if just == "center" else x + w - pad if just == "right" else x + pad
         indent = self.px(9) * int(st.get("indent", 0)) if st else 0   # Excel indent: about one character each
@@ -1021,6 +1064,13 @@ class Grid(ttk.Frame):
         r, c = self.hit(e.x, e.y)
         if r < 0 and c < 0:
             return self.select_all()
+        grab = None if extend or add or self.extra else self.selected_lines()
+        if grab and ((grab[0] == "col" and r < 0 and grab[1] <= c <= grab[2]) or
+                     (grab[0] == "row" and c < 0 and grab[1] <= r <= grab[2])):
+            # pressed on a header that is already selected: dragging moves those columns / rows
+            self.drag = ("movelines", grab[0], grab[1], grab[2], c if grab[0] == "col" else r)
+            self.line_target = None
+            return "break"
         if add:          # Ctrl+click: keep what's selected, start another block
             if self.sel() not in self.extra:
                 self.extra.append(self.sel())
@@ -1098,6 +1148,14 @@ class Grid(ttk.Frame):
 
     def on_release(self, e):
         drag, self.drag = self.drag, None
+        if isinstance(drag, tuple) and drag[0] == "movelines":
+            _, axis, a, b, start = drag
+            t, self.line_target = getattr(self, "line_target", None), None
+            if t is not None and not a <= t <= b + 1:
+                self.app.move_lines(axis, a, b - a + 1, t)
+            else:                                  # a click, not a drag: select just that line, as before
+                self.select_line(axis, start, start)
+            return
         if isinstance(drag, tuple) and drag[0] == "chart":
             import charts
             charts.drop(self, drag[1], drag[2], drag[3], drag[4], e.x, e.y)
@@ -1166,6 +1224,30 @@ class Grid(ttk.Frame):
             W, H = self.cv.winfo_width(), self.cv.winfo_height()
             r, c = self.hit(min(max(e.x, self.hdr_w()), W - 1), min(max(e.y, self.hdr_h()), H - 1))
             self.point_at(self.drag[1], r, c, extend=True)
+            return
+        if isinstance(self.drag, tuple) and self.drag[0] == "movelines":   # line where the rows / columns land
+            _, axis, a, b, _start = self.drag
+            W, H = self.cv.winfo_width(), self.cv.winfo_height()
+            if axis == "col":                      # past an edge: scroll that way
+                if e.x >= W:
+                    self.left += 1
+                elif e.x < self.hdr_w() + self.frozen_w() and self.left > self.fc:
+                    self.left -= 1
+            else:
+                if e.y >= H:
+                    self.top += 1
+                elif e.y < self.hdr_h() + self.frozen_h() and self.top > self.fr:
+                    self.top -= 1
+            self.line_target = self.line_drop(axis, e.x, e.y)
+            self.redraw()
+            t = self.line_target
+            if t is not None and not a <= t <= b + 1:
+                if axis == "col":
+                    x = self.col_x(t)
+                    self.cv.create_line(x, 0, x, H, fill=C["accent"], width=3, tags="moveline")
+                else:
+                    y = self.row_y(t)
+                    self.cv.create_line(0, y, W, y, fill=C["accent"], width=3, tags="moveline")
             return
         if isinstance(self.drag, tuple) and self.drag[0] in ("chart", "image"):   # outline where it lands
             kind, obj, mode, x0, y0 = self.drag
@@ -1267,6 +1349,9 @@ class Grid(ttk.Frame):
         over = images.cursor(self, e.x, e.y)       # a picture / chart: move or resize pointer
         if over:
             self.cv["cursor"] = over
+        elif self.on_selected_header(e.x, e.y) and self.border_at(e.x, e.y) is None \
+                and self.row_border_at(e.x, e.y) is None:
+            self.cv["cursor"] = "fleur"                # selected column / row header: drag to move it
         elif self.on_handle(e.x, e.y):
             self.cv["cursor"] = "crosshair"
         elif self.row_border_at(e.x, e.y) is not None:
@@ -1274,8 +1359,32 @@ class Grid(ttk.Frame):
         else:
             self.cv["cursor"] = "sb_h_double_arrow" if self.border_at(e.x, e.y) is not None else ""
 
+    def typing_formula(self):
+        """A formula is being typed in the cell (scrolling must keep it open to point at far cells)."""
+        e = self.editor
+        return e is not None and e.winfo_exists() and e.get().startswith("=")
+
+    def keep_editor_in_place(self):
+        """After scrolling: the in-cell editor follows its cell; when the cell is out of view it waits out of
+        sight (still focused, still typing; the formula bar shows the text) until the cell scrolls back."""
+        e = self.editor
+        if e is None or not e.winfo_exists():
+            return
+        sheet, r, c = e.cell
+        if sheet is not self.sheet:
+            return
+        x, y = self.col_x(c), self.row_y(r)
+        top = self.hdr_h() + (self.frozen_h() if r >= self.fr else 0)
+        left = self.hdr_w() + (self.frozen_w() if c >= self.fc else 0)
+        if y < top or x < left or y >= self.cv.winfo_height() or x >= self.cv.winfo_width():
+            x, y = -10000, -10000
+        info = e.place_info()
+        if (str(info.get("x")), str(info.get("y"))) != (str(x), str(y)):
+            e.place_configure(x=x, y=y)
+
     def on_wheel(self, e, horizontal=False):
-        self.commit()
+        if not self.typing_formula():          # typing "=…": scroll to point at cells further away
+            self.commit()
         step = -1 if e.delta > 0 else 1
         if horizontal:
             self.left += step
@@ -1583,7 +1692,7 @@ class Grid(ttk.Frame):
         lb.bind("<ButtonRelease-1>", pick)
         lb.bind("<Return>", pick)
         lb.bind("<Escape>", lambda e: (self.close_dropdown(), self.cv.focus_set(), "break")[-1])
-        lb.bind("<FocusOut>", lambda e: self.after(150, self.close_dropdown_if_unfocused))
+        lb.bind("<FocusOut>", lambda e: self._root().after(150, self.close_dropdown_if_unfocused))
         lb.focus_force()
         self.dropdown = (top, lb, opts, pick)
         return "break"
@@ -1644,7 +1753,7 @@ class Grid(ttk.Frame):
         e.bind("<Tab>", lambda ev: self.commit(0, 1))
         e.bind("<Shift-Tab>", lambda ev: self.commit(0, -1))
         e.bind("<Escape>", lambda ev: self.commit(cancel=True))
-        e.bind("<FocusOut>", lambda ev: self.after_idle(self.focus_left, e))
+        e.bind("<FocusOut>", lambda ev: self._root().after_idle(self.focus_left, e))
         e.bind("<KeyRelease>", lambda ev: (fit(), self.show_refs(e.get())), add="+")
         e.bind("<KeyRelease>", lambda ev: self.column_complete(e, ev), add="+")
         typed = initial is not None
@@ -1667,7 +1776,11 @@ class Grid(ttk.Frame):
     def focus_left(self, e):
         """Editor lost focus: finish only if focus went to another control here - switching to
         another program (focus_get() is None) keeps the edit open, like Excel."""
-        if self.editor is e and self.focus_get() not in (None, e):
+        now = self.focus_get()
+        if self.typing_formula() and now in (self.ys, self.xs):   # scrollbar while typing "=…": keep typing
+            e.focus_set()
+            return
+        if self.editor is e and now not in (None, e):
             self.commit()
 
     def commit(self, dr=0, dc=0, cancel=False):

@@ -138,7 +138,7 @@ class SheetTabs(ttk.Frame):
         e.bind("<Return>", lambda ev: self.finish_rename())
         e.bind("<KP_Enter>", lambda ev: self.finish_rename())
         e.bind("<Escape>", lambda ev: self.cancel_rename())
-        e.bind("<FocusOut>", lambda ev: self.after_idle(self.focus_left, e))
+        e.bind("<FocusOut>", lambda ev: self._root().after_idle(self.focus_left, e))
         self.editor = e
 
     def focus_left(self, e):

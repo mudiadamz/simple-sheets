@@ -73,7 +73,7 @@ def test_vertical_align(app):
     anchors = sorted(g.cv.itemcget(i, "anchor") for i in g.cv.find_withtag("txt"))
     assert anchors == ["e", "w"]
     g.goto(0, 0)
-    assert fb.valign.get() == "center" and "Middle" in app.fmt_info["text"]
+    assert fb.valign.get() == "center" and "Middle" in __import__("formatting").describe(app.current.styles.get(app.table.cur))
     fb.set_valign("bottom")                               # back to the default: not stored
     assert "valign" not in (g.style(0, 0) or {})
     app.undo()

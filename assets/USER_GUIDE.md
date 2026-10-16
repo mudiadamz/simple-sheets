@@ -48,6 +48,8 @@ rest of an Excel file (charts, pictures, macros, pivot tables) stays as it was.
 - Right-click row / column headers to insert, delete, hide or resize; Data → Group makes
   collapsible groups (−/+ in the header).
 - View: gridlines, headings, formulas, full screen (F11), split window, dark mode.
+- Move whole columns or rows: select them by their header, then drag the selected header to a new place
+  (a line shows where they'll go). Formats, sizes and formulas move with them; Ctrl+Z undoes it.
 
 ## Data tools
 
@@ -60,6 +62,43 @@ rest of an Excel file (charts, pictures, macros, pivot tables) stays as it was.
 - Tools → Compare with another workbook lists every cell that differs.
 - Insert → Chart draws a column, bar, line, pie or area chart from the selection; Insert → Picture adds an image.
 - Ctrl+Shift+P (command palette) finds any command by typing part of its name.
+
+## Scripts
+
+- Tools → Script… opens a Python editor. `sheet` is the active sheet, `selection` the selected cells,
+  `book` the workbook:
+  `sheet["B1"] = sheet["A1"] * 2`, `sheet["C1"] = "=SUM(A1:A9)"`, `sheet.format("A1:C1", bold=True)`,
+  `for row in selection.rows(): ...`, `print(...)`. Press F5 to run; Examples… has ready-made scripts.
+- A whole run is one undo step. If a script fails or you press Stop, nothing is changed.
+- Data → Run command on selection… sends the selected cells as CSV to any program (PowerShell, Node, R,
+  another Python…) and puts the CSV it prints back.
+- Automation: `SimpleSheets.exe --run job.py book.xlsx --quit` opens the file, runs the script (call
+  `book.save()` to keep its changes) and closes; the result is written to `job.log`.
+- Scripts can do anything Python can on your computer: only run code you trust. Code inside a workbook
+  is never run.
+
+## AI assistant
+
+- Tools → AI assistant… (Ctrl+Shift+A) opens a pane on the right of the window (Ctrl+Shift+A or ✕ hides it;
+  drag its left edge to make it wider). The blue ✦ AI button at the right of the toolbar does the same.
+  Press Enter to ask (Shift+Enter for a new line).
+- Add things to a question: Attach… (a picture, PDF, text file or another spreadsheet), Capture (dim the
+  screen and drag a box around what to send), or Ctrl+V to paste a copied picture or screenshot (Win+Shift+S).
+  They show above the question (✕ removes one) and go with the next message. Pictures and PDFs need a model
+  that reads them: in ⚙ each model says what it reads (text, image, file).
+- It asks an AI model about your sheet or to change it, through
+  OpenRouter with your own API key. Open ⚙ to paste the key (get one at openrouter.ai/keys) and pick a
+  model from the list (prices per million tokens are shown; some models are free).
+- Ask in plain words: "what's the average of column C?", "add a total row", "make the header bold and
+  blue", "split the names in column A into first and last name".
+- When cells should change, the AI writes a script. It appears under the chat: read it (you can edit it),
+  then press ▶ Run. It's one undo step, and nothing changes if it fails. Nothing runs by itself.
+- Ask / Auto (next to the send button): in Ask mode a script shows as a card (Code ▾ to read it) and runs
+  when you press ▶ Run; in Auto mode it runs straight away. Either way it's one Ctrl+Z, and a failing
+  script changes nothing. ⚙ → Auto model lets OpenRouter pick a model for each question.
+- Chats are kept on this computer: ✎ starts a new one, ↺ lists earlier chats to continue (or clear them).
+- Choose what is sent: the sheet (up to about 3,000 cells) or only the selection. Your question and those
+  cells go to OpenRouter and the model's provider. The key is stored encrypted for your Windows account.
 
 ## Printing and exporting
 

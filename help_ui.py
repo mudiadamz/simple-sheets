@@ -19,15 +19,18 @@ SHORTCUTS = [
                  ("Ctrl+Z / Ctrl+Y", "Undo / redo"), ("Ctrl+C / X / V", "Copy / cut / paste"),
                  ("Ctrl+D / Ctrl+R", "Fill down / right"), ("Ctrl+E", "Flash fill"),
                  ("Alt+↓", "Open a cell's drop-down list"), ("Ctrl+K", "Insert a link"),
-                 ("Drag the selection's edge", "Move the cells")]),
+                 ("Drag the selection's edge", "Move the cells"),
+                 ("Drag a selected column / row header", "Move whole columns / rows")]),
     ("Formulas", [("=", "Start a formula; a list of functions appears"), ("Tab", "Take the suggested function"),
                   ("Arrows (after = ( , or an operator)", "Point at a cell; Shift+arrows for a range"),
                   ("F9", "Recalculate (manual calculation)"), ("Ctrl+`", "Show formulas")]),
-    ("Formatting", [("Ctrl+B / I / U", "Bold / italic / underline"), ("🖌", "Format painter"),
+    ("Formatting", [("Ctrl+B / I / U", "Bold / italic / underline"),
+                    ("Ctrl+Shift+> / <", "Bigger / smaller text"), ("🖌", "Format painter"),
                     ("Alt+Shift+→ / ←", "Group / ungroup rows or columns")]),
     ("Find & view", [("Ctrl+F / Ctrl+H", "Find / replace"), ("F7", "Spelling"),
                      ("Ctrl + / Ctrl - / Ctrl+wheel", "Zoom"), ("F11", "Full screen"), ("F1", "This list")]),
     ("Keyboard only", [("Ctrl+Shift+P", "Command palette: type to find any command"),
+                       ("Ctrl+Shift+A", "AI assistant"),
                        ("Ctrl+Alt+5", "Pick charts / pictures (Tab: the next one)"),
                        ("Arrows / Shift+Arrows / Delete", "Move / resize / remove the picked chart or picture"),
                        ("F6 / Shift+F6", "Cells → formula bar → name box → sheet tabs"),
@@ -43,12 +46,12 @@ def resource(*parts):
     return os.path.join(base, *parts)
 
 
-def guide_text():
+def guide_text(name="USER_GUIDE.md"):
     try:
-        with open(resource("assets", "USER_GUIDE.md"), encoding="utf-8") as f:
+        with open(resource("assets", name), encoding="utf-8") as f:
             return f.read()
     except OSError:
-        return "The user guide wasn't found."
+        return "The guide wasn't found."
 
 
 def shortcuts_text():
@@ -73,8 +76,15 @@ class HelpWindow(tk.Toplevel):
         sb.pack(side="right", fill="y")
         box.pack(fill="both", expand=True)
         box.tag_configure("h", font=("Segoe UI", 12, "bold"), spacing1=8)
+        box.tag_configure("code", background=C["header_bg"], foreground=C["fg"], lmargin1=16, lmargin2=16,
+                          wrap="none")                       # code lines stay whole (scroll sideways if needed)
+        in_code = False
         for line in text.split("\n"):
-            if line.startswith("#") or line in GROUPS:
+            if line.startswith("```"):             # fenced example: shaded, kept as typed
+                in_code = not in_code
+            elif in_code:
+                box.insert("end", line + "\n", "code")
+            elif line.startswith("#") or line in GROUPS:
                 box.insert("end", line.lstrip("# ") + "\n", "h")
             else:
                 box.insert("end", line + "\n")
@@ -88,6 +98,10 @@ def show(app, what):
         return HelpWindow(app, "Keyboard shortcuts", shortcuts_text())
     if what == "guide":
         return HelpWindow(app, "User guide", guide_text())
+    if what == "scripts":
+        w = HelpWindow(app, "Script guide", guide_text("SCRIPT_GUIDE.md"))
+        w.geometry(f"{int(820 * app.scale)}x{int(640 * app.scale)}")
+        return w
     from tkinter import messagebox
     messagebox.showinfo("About", f"{APP_NAME} {APP_VERSION}\n\nA light viewer / editor for spreadsheet files "
                         "(.xlsx, .xlsm, .xlsb, .xls, .ods, .csv).", parent=app)

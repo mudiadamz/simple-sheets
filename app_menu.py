@@ -65,6 +65,8 @@ def build(app, parent):
     data.add_command(label="Advanced filter…", command=lambda: app.data_tool("advanced"))
     data.add_command(label="Import text / CSV…", command=lambda: __import__("import_data").import_csv(app))
     data.add_command(label="Import table from web…", command=lambda: __import__("import_data").import_web(app))
+    data.add_command(label="Run command on selection…",
+                     command=lambda: __import__("scripting").run_command_dialog(app))
     data.add_separator()
     data.add_command(label="Pivot table…", command=lambda: app.data_tool("pivot"))
     data.add_command(label="Refresh pivot tables", command=lambda: __import__("pivots").refresh(app))
@@ -90,6 +92,9 @@ def build(app, parent):
                       command=lambda: __import__("function_help").InsertFunction(app))
     tools.add_command(label="Evaluate formula…", command=lambda: __import__("function_help").EvaluateDialog(app))
     tools.add_command(label="Compare with another workbook…", command=lambda: __import__("compare").open_compare(app))
+    tools.add_command(label="Script…", command=lambda: __import__("scripting").open_window(app))
+    tools.add_command(label="AI assistant…", accelerator="Ctrl+Shift+A",
+                      command=lambda: __import__("ai_assist").open_assistant(app))
     tools.add_command(label="Command palette…", accelerator="Ctrl+Shift+P",
                       command=lambda: __import__("palette").open_palette(app))
     tools.add_command(label="Calculation…", command=lambda: wt.CalculationDialog(app))
@@ -102,6 +107,7 @@ def build(app, parent):
     help_ = tk.Menu(menu, tearoff=False)
     help_.add_command(label="Keyboard shortcuts", accelerator="F1", command=lambda: app.show_help("shortcuts"))
     help_.add_command(label="User guide", command=lambda: app.show_help("guide"))
+    help_.add_command(label="Script guide", command=lambda: app.show_help("scripts"))
     help_.add_command(label="Tips", command=lambda: __import__("palette").show_tips(app))
     help_.add_command(label="Check for updates…", command=lambda: app.check_updates())
     help_.add_command(label="About", command=lambda: app.show_help("about"))
@@ -174,6 +180,56 @@ def disk_icon(master, scale, color):
     box(3, 9, 13, 15, "#ffffff")       # label
     box(4, 11, 12, 12, color)          # a line on the label
     return img
+
+
+def sparkle_icon(master, scale, color, img=None):
+    """A four-pointed sparkle (plus a small one): the AI assistant's mark."""
+    s = max(int(16 * scale), 16)
+    if img is None:
+        img = tk.PhotoImage(master=master, width=s, height=s)
+    else:
+        img.blank()
+    k = s / 16
+
+    def star(cx, cy, r):
+        for t in range(-r, r + 1):
+            w = max(int((r - abs(t)) * 0.3), 0)
+            img.put(color, to=(int(cx - w), int(cy + t), int(cx + w + 1), int(cy + t + 1)))   # up / down arm
+            img.put(color, to=(int(cx + t), int(cy - w), int(cx + t + 1), int(cy + w + 1)))   # left / right arm
+    star(6.5 * k, 9 * k, int(6 * k))
+    star(13 * k, 3 * k, max(int(2.5 * k), 2))
+    return img
+
+
+def ai_button(app, parent):
+    """The toolbar's AI button: coloured, at the right end; opens / hides the assistant pane."""
+    from format_bar import Tooltip
+    b = tk.Label(parent, text=" AI", compound="left", font=("Segoe UI", 10, "bold"), padx=10, pady=1,
+                 cursor="hand2", borderwidth=0)
+    b._own_colors = True                                   # theme.py leaves it alone; refresh_ai_button colours it
+    b.bind("<Button-1>", lambda e: __import__("ai_assist").open_assistant(app))
+    b.bind("<Enter>", lambda e: refresh_ai_button(app, hover=True))
+    b.bind("<Leave>", lambda e: refresh_ai_button(app))
+    b.pack(side="right", padx=(6, 6), pady=(0, 2))
+    Tooltip(b, "AI assistant (Ctrl+Shift+A)")
+    app.ai_btn = b
+    refresh_ai_button(app)
+    return b
+
+
+def refresh_ai_button(app, hover=False):
+    """Colours: accent; darker and 'pressed' while the pane is open (or under the mouse)."""
+    from theme import C, shade
+    b = getattr(app, "ai_btn", None)
+    if b is None or not b.winfo_exists():
+        return
+    pane = getattr(app, "ai_pane", None)
+    open_ = pane is not None and pane.win.winfo_exists() and pane.visible()
+    bg = shade(C["accent"], 0.25) if (open_ or hover) and not C.get("contrast") else C["accent"]
+    app.ai_icon = sparkle_icon(app, app.scale, C["on_accent"], getattr(app, "ai_icon", None))
+    b.configure(image=app.ai_icon, background=bg, foreground=C["on_accent"], relief="sunken" if open_ else "flat",
+                activebackground=bg)
+    b.open = open_
 
 
 def fill_recent(app, menu):

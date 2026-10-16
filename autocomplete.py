@@ -114,7 +114,7 @@ class Autocomplete:
                        ("<Tab>", self.accept), ("<Return>", self.accept), ("<KP_Enter>", self.accept),
                        ("<Escape>", self.close)):
             widget.bind_class(tag, seq, lambda e, f=f: "break" if self.items and f() is not False else None)
-        widget.bind_class(tag, "<FocusOut>", lambda e: widget.after(150, self.close_if_unfocused))
+        widget.bind_class(tag, "<FocusOut>", lambda e: widget._root().after(150, self.close_if_unfocused))
         widget.bind_class(tag, "<Destroy>", lambda e: self.destroy())
 
     # ---- what to suggest ----

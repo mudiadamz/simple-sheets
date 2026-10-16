@@ -33,7 +33,7 @@ import tables
 import theme
 import workbook_tools
 from format_bar import FormatBar, Tooltip
-from formatting import DEFAULT_SIZE, describe, parse_number
+from formatting import DEFAULT_SIZE, parse_number
 from formula import Engine
 from grid import ALL, Grid, col_name
 from sheet_tabs import SheetTabs
@@ -122,6 +122,7 @@ class App(tk.Tk):
         top = ttk.Frame(self, padding=(4, 4, 0, 0))
         top.pack(fill="x")
         app_menu.build(self, top)
+        app_menu.ai_button(self, top)          # right end of the row (packed before the format bar takes the rest)
         self.fmtbar = FormatBar(top, self, self.scale)
         self.fmtbar.pack(side="left", fill="x", expand=True)
 
@@ -137,6 +138,11 @@ class App(tk.Tk):
         Tooltip(self.ref, "Name box: type a cell or range (B12, A1:C5, Sheet2!B3) and press Enter (Ctrl+G)")
         from cell_editor import FormulaBar
         self.value = FormulaBar(fbar, self.table_font_for_bar())
+        # ▾ / ▴: show long text on several lines, or keep the bar to one line (like Excel)
+        self.fbar_toggle = ttk.Button(fbar, text="▴" if self.value.expanded else "▾", width=2, style="Toolbutton",
+                                      command=self.toggle_formula_bar)
+        self.fbar_toggle.pack(side="right", anchor="n")
+        Tooltip(self.fbar_toggle, "Expand / collapse the formula bar")
         self.value.pack(side="left", fill="x", expand=True, padx=4)
         self.value.bind("<Return>", self.value_commit)
         self.value.bind("<KeyRelease>", lambda e: self.table.show_refs(self.value.get()), add="+")
@@ -144,8 +150,6 @@ class App(tk.Tk):
         self.value.bind("<FocusOut>", lambda e: self.table.show_refs(""), add="+")
         self.value.bind("<Escape>", self.value_cancel)
         autocomplete.attach(self.value, self)
-        self.fmt_info = ttk.Label(fbar, foreground=theme.C["muted"])
-        self.fmt_info.pack(side="right")
 
         # bottom: sheet tabs + status
         bottom = ttk.Frame(self)
@@ -208,6 +212,8 @@ class App(tk.Tk):
         for k in ("minus", "KP_Subtract"):
             self.bind(f"<Control-{k}>", lambda e: self.zoom_step(-1))
         self.bind("<Control-0>", lambda e: self.zoom_to(1.0))
+        self.bind("<Control-greater>", lambda e: (self.fmtbar.step_size(1), "break")[-1])   # Ctrl+Shift+> (Excel)
+        self.bind("<Control-less>", lambda e: (self.fmtbar.step_size(-1), "break")[-1])     # Ctrl+Shift+<
         self.bind("<Control-KP_0>", lambda e: self.zoom_to(1.0))
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         # drag files from Explorer: hooked up when the window is shown (its handle can change before that,
@@ -225,9 +231,15 @@ class App(tk.Tk):
         import keyboard_nav  # Ctrl+Alt+5 objects, F6 panes, sheet tabs by keyboard
         keyboard_nav.install(self)
         self.bind("<Control-P>", lambda e: (__import__("palette").open_palette(self), "break")[-1])  # Ctrl+Shift+P
+        self.bind("<Control-Shift-A>", lambda e: (__import__("ai_assist").open_assistant(self), "break")[-1])
         import platform_ui  # macOS: ⌘ works wherever Ctrl does
         platform_ui.mirror_command_keys(self)
         platform_ui.mirror_command_keys(self.table.cv)
+
+    def toggle_formula_bar(self):
+        on = self.value.set_expanded(not self.value.expanded)
+        self.fbar_toggle.configure(text="▴" if on else "▾")
+        return on
 
     def table_font_for_bar(self):
         from tkinter import font as tkfont
@@ -258,9 +270,12 @@ class App(tk.Tk):
         """Light / dark (or high contrast) for the whole window."""
         self.dark_var.set(dark)
         theme.apply(self, dark, self.contrast_var.get())
-        self.fmt_info.configure(foreground=theme.C["muted"])
         self.fmtbar.refresh_icons()
         self.__dict__.pop("menu_icons", None)   # right-click menu icons get redrawn in the new ink
+        pane = getattr(self, "ai_pane", None)
+        if pane is not None and pane.win.winfo_exists():
+            pane.recolor()                       # the AI chat keeps its own colours
+        app_menu.refresh_ai_button(self)
         self.table.redraw()
 
     # ---------- model ----------
@@ -483,6 +498,43 @@ class App(tk.Tk):
             group.append(("nm", None, 0, 0, dict(self.names), names))
             self.write_cell("nm", None, 0, 0, names)
         self.push(group)
+
+    def move_lines(self, axis, a, n, t):
+        """Move rows / columns a .. a+n-1 so they sit before line t (dragging selected headers). One undo
+        step; the moved lines stay selected. Returns the new first index, or None if nothing moved."""
+        self.table.commit()
+        if a <= t <= a + n:
+            return None
+        if self.current.props.get("protect"):
+            self.protected_warning()
+            return None
+        if self.sheet in self.truncated():
+            messagebox.showwarning("Too big", f"Only the first {io.MAX_ROWS:,} rows are loaded, so rows "
+                                              "and columns can't be moved in this sheet.")
+            return None
+        before = structure.snapshot(self.sheets)
+        try:
+            changed = structure.move(self.sheets, self.sheet, axis, a, n, t)
+        except ValueError:
+            structure.restore(self.sheets, before)
+            messagebox.showwarning("Move", "Part of a merged block would move away from the rest. "
+                                           "Select the whole merged rows / columns, or unmerge first.", parent=self)
+            return None
+        for home, r, c in changed:
+            if home != self.sheet:   # formulas on other sheets: saved as normal cell edits
+                self.base.setdefault(("v", self.sheets[home], r, c), before[home]["rows"][r][c])
+        first = t if t < a else t - n
+        g = self.table
+        cur = (0, first) if axis == "col" else (first, 0)
+        group = [("x", self.current, cur[0], cur[1], before, structure.snapshot(self.sheets))]
+        perm = structure.mover(a, n, t)
+        names = {k: formula.permute(v, self.sheet, self.sheet, axis, perm) for k, v in self.names.items()}
+        if names != self.names:
+            group.append(("nm", None, 0, 0, dict(self.names), names))
+            self.write_cell("nm", None, 0, 0, names)
+        self.push(group)
+        g.select_line(axis, first, first + n - 1)
+        return first
 
     def shift_cells(self, direction):
         """Insert cells (shift right/down) or delete cells (shift left/up) for the selection."""
@@ -991,7 +1043,6 @@ class App(tk.Tk):
         if self.focus_get() is not self.value and self.formula_home is None:
             self.value.delete(0, "end")
             self.value.insert(0, g.text(r, c).replace("\n", NEWLINE_MARK))
-        self.fmt_info["text"] = "Format: " + describe(g.sheet.styles.get((r, c)))
         self.fmtbar.sync(g.sheet.styles.get((r, c)))
         self.fmtbar.merged.set((r, c) in g.merge_at)
         # Excel-style stats for multi-cell selections
@@ -1969,13 +2020,23 @@ if __name__ == "__main__":
             sys.exit(0)
     except Exception:
         pass
+    args = sys.argv[1:]
+    script, quit_after = None, "--quit" in args
+    if "--run" in args and args.index("--run") + 1 < len(args):   # --run script.py [file] [--quit]
+        k = args.index("--run")
+        script = args[k + 1]
+        del args[k:k + 2]
+    args = [a for a in args if a != "--quit"]
     app = App()
-    if len(sys.argv) > 2 and sys.argv[1] == "--recover":
-        app.after(50, app.load_recovered, sys.argv[2])
-    elif len(sys.argv) > 1:
-        app.after(50, app.open_file, sys.argv[1])
+    if len(args) > 1 and args[0] == "--recover":
+        app.after(50, app.load_recovered, args[1])
+    elif args:
+        app.after(50, app.open_file, args[0])
+    if script:
+        import scripting
+        app.after(300, lambda: scripting.run_at_start(app, script, quit_after))
     app.after(400, app.offer_recovery)   # work left by a window that crashed
-    if len(sys.argv) == 1:                 # a plain start (not opening a file): a tip
+    if not args and not script:            # a plain start (not opening a file): a tip
         import palette
         app.after(900, lambda: palette.first_run(app))
     if settings.get("check_updates") and settings.get("update_url"):

@@ -1,15 +1,26 @@
 @echo off
 rem Builds dist\SimpleSheets.exe (the app) and dist\SimpleSheets-Setup.exe (installer with the app inside).
-setlocal
+setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 python -m pip install -q -r requirements.txt pyinstaller pillow || exit /b 1
 python tools\make_icon.py || exit /b 1
 
+rem Every app module goes in: many are only loaded when a menu item is used (__import__ in a lambda),
+rem which PyInstaller can't see. The setup program (installer.py) is built separately below.
+set HIDDEN=
+for %%f in ("%~dp0*.py") do (
+  if /i not "%%~nf"=="installer" if /i not "%%~nf"=="simple_sheets" set HIDDEN=!HIDDEN! --hidden-import %%~nf
+)
+
 python -m PyInstaller --noconfirm --onefile --windowed --name SimpleSheets ^
   --icon "%~dp0assets\simple_sheets.ico" --add-data "%~dp0assets;assets" ^
-  --exclude-module pandas --exclude-module numpy --exclude-module PIL ^
+  --exclude-module pandas --exclude-module numpy --exclude-module PIL !HIDDEN! ^
+  --hidden-import statistics --hidden-import random --hidden-import decimal --hidden-import fractions ^
+  --hidden-import itertools --hidden-import collections --hidden-import string --hidden-import textwrap ^
+  --hidden-import pathlib --hidden-import json --hidden-import math ^
   --workpath "%TEMP%\ss-build" --specpath "%TEMP%\ss-build" simple_sheets.py || exit /b 1
 call :sign dist\SimpleSheets.exe || exit /b 1
+python tools\check_exe.py || exit /b 1
 
 python -m PyInstaller --noconfirm --onefile --windowed --name SimpleSheets-Setup ^
   --icon "%~dp0assets\simple_sheets.ico" --add-data "%~dp0assets;assets" ^

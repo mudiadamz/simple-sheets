@@ -105,3 +105,51 @@ def test_point_from_formula_bar(app, tmp_path):
     assert v.get() == "=B2:B4" and g.cur == (7, 0)
     app.value_commit()
     assert g.text(7, 0) == "=B2:B4"
+
+
+class Wheel:
+    def __init__(self, delta):
+        self.delta, self.x, self.y = delta, 5, 5
+
+
+def test_scroll_while_typing_formula_keeps_editing(app, tmp_path):
+    """Typing =, scrolling down with the wheel to a far cell, clicking it: the edit stays open."""
+    g = open_in(app, workbooks.budget(tmp_path / "b.xlsx"))
+    app.set_cells([(80, 1, "42")])
+    e = start_formula(app, 2, 0, "=SUM(")
+    for _ in range(25):                                   # 75 rows down: the edited cell is off screen
+        g.on_wheel(Wheel(-120))
+    app.update()
+    assert g.editor is e and e.winfo_exists() and g.top >= 70
+    assert int(e.place_info()["y"]) < 0                   # waiting out of sight, still the editor
+    click(app, 80, 1)
+    assert e.get() == "=SUM(B81"
+    e.focus_force()
+    app.update()
+    e.event_generate("<KeyPress>", keysym="plus", when="now")   # typing still reaches the hidden editor
+    assert app.focus_get() is e and e.get() == "=SUM(B81+"
+    e.delete(len(e.get()) - 1, "end")
+    e.insert("end", ")")
+    for _ in range(25):                                   # back up: the editor sits on its cell again
+        g.on_wheel(Wheel(120))
+    app.update()
+    assert int(e.place_info()["y"]) == g.row_y(2) and int(e.place_info()["x"]) == g.col_x(0)
+    key(app, "<Return>", e)
+    assert g.text(2, 0) == "=SUM(B81)" and g.value(2, 0) == "42"
+
+
+def test_scrollbar_while_typing_formula(app, tmp_path):
+    g = open_in(app, workbooks.budget(tmp_path / "b.xlsx"))
+    e = start_formula(app, 1, 1)
+    g.yview("scroll", 40, "units")
+    g.ys.focus_set()                                      # a click on the scrollbar takes the focus
+    app.update()
+    assert g.editor is e and app.focus_get() is e
+    g.commit(cancel=True)
+
+
+def test_wheel_still_finishes_plain_text(app, tmp_path):
+    g = open_in(app, workbooks.budget(tmp_path / "b.xlsx"))
+    e = start_formula(app, 1, 1, "hello")
+    g.on_wheel(Wheel(-120))
+    assert g.editor is None and not e.winfo_exists() and g.text(1, 1) == "hello"

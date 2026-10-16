@@ -95,7 +95,7 @@ class IconDropdown:
         self.popup = top
 
     def later_close(self):
-        self.button.after(300, self.close_if_away)
+        self.button._root().after(300, self.close_if_away)
 
     def close_if_away(self):
         """Close unless the mouse is over the button or the strip."""
@@ -145,6 +145,10 @@ class FormatBar(ttk.Frame):
         self.size.bind("<<ComboboxSelected>>", lambda e: self.set_size())
         self.size.bind("<Return>", lambda e: self.set_size())
         Tooltip(self.size, "Font size")
+        for text, step, tip in (("A▴", 1, "Bigger text (Ctrl+Shift+>)"), ("A▾", -1, "Smaller text (Ctrl+Shift+<)")):
+            b = ttk.Button(self, text=text, style="Toolbutton", width=3, command=lambda s=step: self.step_size(s))
+            b.pack(side="left")
+            Tooltip(b, tip)
         self.sep()
 
         self.vars = {}
@@ -496,6 +500,18 @@ class FormatBar(ttk.Frame):
             return
         if 1 <= size <= 409:
             self.app.format_cells(lambda st: {**st, "size": size})
+        self.done()
+
+    def step_size(self, step):
+        """A▴ / A▾: each selected cell to the next bigger / smaller standard size (like Excel)."""
+        def bump(st):
+            cur = float(st.get("size") or DEFAULT_SIZE)
+            if step > 0:
+                new = next((s for s in SIZES if s > cur), min(cur + 12, 409))
+            else:
+                new = next((s for s in reversed(SIZES) if s < cur), max(cur - 1, 1))
+            return {**st, "size": float(new)}
+        self.app.format_cells(bump)
         self.done()
 
     def set_preset(self):

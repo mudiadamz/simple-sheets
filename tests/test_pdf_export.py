@@ -67,3 +67,35 @@ def test_menu_has_pdf_and_print(app):
     m = app.app_menu
     labels = [m.entrycget(i, "label") for i in range(m.index("end") + 1) if m.type(i) != "separator"]
     assert "Export to PDF…" in labels and "Print…" in labels
+
+
+LONG = ("Sebagai SISTEM, saya ingin mengintegrasikan API OPT untuk depositPG, topupPG, disbursePG, autoWDPG, "
+        "callback, dan check, sehingga transaksi diproses melalui Actual PAYMENT GATEWAY OPT secara aman.")
+
+
+def test_wrapped_rows_grow_and_text_stays_in_its_cell(app, tmp_path):
+    import pdf_export
+    g = app.table
+    app.set_cells([(0, 0, "ISP-1"), (0, 1, LONG), (1, 0, "ISP-2"), (1, 1, "short")])
+    g.select(0, 1, 1, 1)
+    app.format_cells(lambda st: {**st, "wrap": True})
+    app.set_width(1, 30)
+    p = pdf_export.plan(app)
+    assert p["heights"][0] > 4 * 11 * 1.2 and p["heights"][1] < 20       # the long one grew, the short one didn't
+    pdf_export.export(app, str(tmp_path / "w.pdf"))
+    data = open(tmp_path / "w.pdf", "rb").read()
+    assert data.count(b"re W n") >= 4                                     # every text clipped to its cell
+
+
+def test_hand_set_height_keeps_and_clips(app, tmp_path):
+    import pdf_export
+    g = app.table
+    app.set_cells([(0, 0, LONG), (1, 0, "below")])
+    g.select(0, 0, 0, 0)
+    app.format_cells(lambda st: {**st, "wrap": True})
+    app.set_height(0, 20)                                                 # set by hand: Excel keeps it
+    p = pdf_export.plan(app)
+    assert p["heights"][0] == 20
+    stream = pdf_export.page_stream_of(p, 0)
+    # the long cell's text is clipped to a 20 pt box, so it can't run into "below"
+    assert b"re W n" in stream and b"20.00 re W n" in stream

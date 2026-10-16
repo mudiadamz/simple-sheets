@@ -20,6 +20,8 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
 - `simple_sheets.py` — app window, files, sheets add/rename/delete, undo/redo history, save
 - `app_menu.py` — ☰ menu (new/open/recent/save) + undo/redo buttons
 - `recent.py` — recent files list (`%APPDATA%\SimpleSheets\recent.json`; tests set `SIMPLE_SHEETS_HOME`)
+  - conftest points `SIMPLE_SHEETS_HOME` at a temp folder for EVERY test (autouse): never write the user's real
+    settings (a test once wiped the saved AI key); `tests/test_settings_safety.py` guards it
 - `settings.py` — user preferences (`settings.json`, same folder), e.g. dark mode
 - `theme.py` — light/dark palettes (`theme.C` = active colours); new UI colours go here, never hard-coded
 - Tk images / variables always get an explicit master (`master=self`) — without it they attach to another Tk instance in tests
@@ -70,6 +72,11 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
 - `print_preview.py` — preview window, PDF of all sheets / selection, page breaks (view, manual, saved)
 - `cloud.py` — OneDrive / Dropbox / Google Drive folders, conflict copies; `platform_ui.py` — Linux / macOS differences
 - `keyboard_nav.py` — Ctrl+Alt+5 charts / pictures, F6 panes, sheet tabs by keyboard; `palette.py` — Ctrl+Shift+P, tips
+- `scripting.py` — Tools → Script… (Python with a `sheet` / `book` / `selection` API, one undo step, rollback on error),
+  Data → Run command on selection (CSV through any program), `--run script.py [file] [--quit]`
+- `ai_assist.py` — Tools → AI assistant (OpenRouter, user's key stored with DPAPI, model picker); the model replies
+  with a script for `scripting.run`, shown first and run only on ▶ Run. Tests use a fake transport, never the network
+- `structure.move` / `App.move_lines` — drag selected column / row headers to move them (`formula.permute` fixes refs)
 - Portable mode: a `SimpleSheetsData` folder (or `portable.txt`) next to the exe holds the settings (`recent.portable_dir`)
 - Don't write Python containing backslashes or non-ASCII through bash heredocs (they get mangled): use Edit / Write
 - Saving: per-sheet things that aren't cell edits are undoable kinds in `App.read/write_cell`

@@ -119,7 +119,7 @@ def test_formula_bar_and_format_info(app, tmp_path):
     path = workbooks.styled(tmp_path / "s.xlsx")
     g = open_in(app, path)
     g.goto(2, 2)
-    assert "$" in app.fmt_info["text"]
+    assert "$" in __import__("formatting").describe(app.current.styles.get(app.table.cur))
     app.value.delete(0, "end")
     app.value.insert(0, "0.75")
     app.value_commit()

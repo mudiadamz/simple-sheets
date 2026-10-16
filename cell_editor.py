@@ -45,13 +45,17 @@ class CellEditor(tk.Text):
 
 
 class FormulaBar(CellEditor):
-    """The formula bar: one line that grows (up to MAX_LINES) for a long formula, with each cell reference
-    coloured like its outline on the grid."""
+    """The formula bar: one line (long text scrolls sideways, like Excel); expanded with the ▾ button it shows
+    up to MAX_LINES wrapped lines. Each cell reference is coloured like its outline on the grid."""
     MAX_LINES = 5
+    EXPANDED_MIN = 3
 
     def __init__(self, master, font):
         super().__init__(master, font, wrap=True)
         self.configure(height=1, padx=4, pady=2)
+        import settings
+        self.expanded = bool(settings.get("formula_bar_expanded", False))
+        self.configure(wrap="word" if self.expanded else "none")
         self.bind("<KeyRelease>", lambda e: self.refresh(), add="+")
         self.bind("<Configure>", lambda e: self.fit(), add="+")
         self.bind("<Tab>", lambda e: "break")            # Tab doesn't type a tab character here
@@ -65,10 +69,24 @@ class FormulaBar(CellEditor):
         self.refresh()
 
     def fit(self):
+        """One line, or (expanded) as many lines as the text needs between EXPANDED_MIN and MAX_LINES."""
         try:
-            self.configure(height=max(1, min(self.lines(), self.MAX_LINES)))
+            if self.expanded:
+                self.configure(height=max(self.EXPANDED_MIN, min(self.lines(), self.MAX_LINES)))
+            elif str(self.cget("height")) != "1":
+                self.configure(height=1)
         except tk.TclError:
             pass
+
+    def set_expanded(self, on):
+        import settings
+        self.expanded = bool(on)
+        settings.set("formula_bar_expanded", self.expanded)
+        self.configure(wrap="word" if self.expanded else "none")
+        self.fit()
+        if not self.expanded:
+            self.see("insert")
+        return self.expanded
 
     def refresh(self):
         self.color_refs()

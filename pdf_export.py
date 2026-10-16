@@ -39,8 +39,9 @@ def esc(text):
     return data.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)").replace(b"\r", b"")
 
 
-def layout(sheet, value_of, style_of):
-    """Visible used area -> (rows, cols, col widths pt, row heights pt)."""
+def layout(sheet, value_of, style_of, measure=None):
+    """Visible used area -> (rows, cols, col widths pt, row heights pt). Rows without a height set by hand grow
+    for big fonts and for wrapped text (like the grid and Excel), up to Excel's 409 pt."""
     rows = [r for r in range(len(sheet.rows))
             if r not in sheet.hidden_rows and r not in sheet.filtered_rows]
     last_r = max((r for r in rows if any(sheet.rows[r]) or any((r, c) in sheet.styles for c in range(5))),
@@ -62,7 +63,27 @@ def layout(sheet, value_of, style_of):
         else:
             big = max(((style_of(r, c) or {}).get("size") or DEFAULT_SIZE for c in cols), default=DEFAULT_SIZE)
             heights[r] = max(15.0, big * 1.35)
+            if measure is not None:
+                heights[r] = max(heights[r], _wrapped_height(sheet, r, cols, widths, value_of, style_of, measure))
     return rows, cols, widths, heights
+
+
+def _wrapped_height(sheet, r, cols, widths, value_of, style_of, measure):
+    """Height a row needs for its wrapped cells (merged blocks excepted)."""
+    merged = {(i, j) for r1, c1, r2, c2 in sheet.merges for i in range(r1, r2 + 1) for j in range(c1, c2 + 1)}
+    h = 0.0
+    for c in cols:
+        st = style_of(r, c) or {}
+        if not st.get("wrap") or (r, c) in merged:
+            continue
+        t = value_of(r, c) if c < len(sheet.rows[r]) else ""
+        if not t:
+            continue
+        disp = render(t, st.get("numfmt")) if st.get("numfmt") else t
+        size = float(st.get("size") or DEFAULT_SIZE)
+        lines = wrap(disp, widths[c] - 4, size, bool(st.get("bold")), bool(st.get("italic")), measure)
+        h = max(h, len(lines) * size * 1.2 + 6)
+    return min(h, 409.0)
 
 
 def split(items, size, room, breaks=()):
@@ -121,7 +142,8 @@ def plan(app, name=None, area=None, gridlines=True):
             st = {**(st or {}), **cf}
         return st
 
-    rows, cols, widths, heights = layout(sheet, value, style)
+    measure = Measure(app)
+    rows, cols, widths, heights = layout(sheet, value, style, measure)
     page = sheet.props.get("page")                 # the file's page setup (sheet_props.read_page)
     if page is not None:
         gridlines = bool(page.get("gridlines"))    # Excel prints gridlines only when asked to
@@ -161,7 +183,6 @@ def plan(app, name=None, area=None, gridlines=True):
     title_h = sum(heights[r] for r in titles_r)
     title_w = sum(widths[c] for c in titles_c)
     room_w, room_h = usable_w / scale - title_w, usable_h / scale - title_h
-    measure = Measure(app)
     merge_at = {}
     for m in sheet.merges:
         for r in range(m[0], m[2] + 1):
@@ -240,8 +261,8 @@ def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, meas
         align = st.get("align") or ("right" if is_num else "left")
         pad = 2.0
         lines = wrap(disp, w - 2 * pad, size, bold, italic, measure) if st.get("wrap") else [disp.split("\n")[0]]
+        room = w
         if not st.get("wrap"):
-            room = w
             if align == "left" and (r, c) not in merge_at:   # spill into empty cells on the right
                 for c2 in cols[cols.index(c) + 1:]:
                     if value(r, c2) or (r, c2) in merge_at:
@@ -251,6 +272,10 @@ def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, meas
         lead = size * 1.2
         valign = st.get("valign") or "bottom"
         block = lead * len(lines)
+        if block > h - pad:                         # more lines than the row holds: show the first ones
+            valign = "top"
+        # the text stays inside its cell (or the empty cells it spills into), like Excel
+        out.append(("q %.2f %.2f %.2f %.2f re W n" % (x, -(top + h), room, h)).encode())
         first = top + (pad + size if valign == "top" else (h - block) / 2 + size if valign == "center"
                        else h - pad - block + size - 1)
         color = rgb(st["fg"]) if st.get("fg") else (0, 0, 0)
@@ -267,6 +292,7 @@ def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, meas
             if st.get("strike"):
                 out.append(("%.2f w %.2f %.2f m %.2f %.2f l S" % (size / 18, lx, -ly + size * 0.3, lx + lw,
                                                                  -ly + size * 0.3)).encode())
+        out.append(b"Q")                            # end of this cell's clip
     out.append(b"Q")
     return b"\n".join(out)
 

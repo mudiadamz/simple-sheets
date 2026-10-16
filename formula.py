@@ -320,6 +320,39 @@ def adjust(formula, home, target, axis, at, n):
     return "".join(out)
 
 
+def permute(formula, home, target, axis, perm):
+    """Rows / columns of sheet `target` were reordered: index i is now perm(i). References follow their
+    cells; a range follows its two ends (re-sorted) - but a range that covers every reordered line
+    (perm.span) holds the same cells afterwards and stays as it is. home = the formula's sheet."""
+    span = getattr(perm, "span", None)
+    out = []
+    for kind, tok in lex(formula):
+        if kind in ("ref", "cols", "rows"):
+            sheet, ref = split_sheet(tok)
+            if (sheet or home).lower() == target.lower() and \
+                    not (kind == "cols" and axis == "row") and not (kind == "rows" and axis == "col"):
+                prefix = tok[:len(tok) - len(ref)]
+                parts = [p for p in re.findall(r"(\$?)([A-Za-z]*)(\$?)(\d*)", ref) if p[1] or p[3]]
+                idx = [(int(p[3]) - 1 if axis == "row" else col_index(p[1])) for p in parts]
+                if len(idx) == 2 and span and min(idx) <= span[0] and max(idx) >= span[1]:
+                    out.append(tok)                 # =SUM(A2:D2) with B moved after D: same cells, same range
+                    continue
+                new = [perm(i) for i in idx]
+                if len(new) == 2:
+                    new = sorted(new)
+                rebuilt = []
+                for p, v in zip(parts, new):
+                    cabs, col, rabs, row = p
+                    if axis == "row" and row:
+                        row = str(v + 1)
+                    elif axis == "col" and col:
+                        col = col_letters(v)
+                    rebuilt.append(f"{cabs}{col}{rabs}{row}")
+                tok = prefix + ":".join(rebuilt)
+        out.append(tok)
+    return "".join(out)
+
+
 # ---------- parser ----------
 
 class Parser:

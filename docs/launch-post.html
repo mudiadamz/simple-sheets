@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Introducing Simple Sheets</title>
+<meta name="description" content="Simple Sheets 2.0: a fast, lightweight spreadsheet app for Windows that opens Excel, OpenDocument and CSV files in a blink and saves them without wrecking their formatting.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff; --surface: #f8fafc; --ink: #111827; --text: #374151; --muted: #6b7280; --line: #e5e7eb;
+    --teal: #0d9488; --teal-soft: #ccfbf1; --violet: #7c3aed; --violet-soft: #ede9fe;
+    --amber: #d97706; --amber-soft: #fef3c7; --rose: #e11d48; --rose-soft: #ffe4e6;
+    --hero: #111827; --hero-text: #f9fafb; --hero-muted: #9ca3af; --code-bg: #f3f4f6; --shadow: 0 20px 50px -20px rgba(17, 24, 39, .35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0f17; --surface: #111827; --ink: #f9fafb; --text: #d1d5db; --muted: #9ca3af; --line: #1f2937;
+      --teal-soft: #134e4a; --violet-soft: #2e1065; --amber-soft: #451a03; --rose-soft: #4c0519;
+      --hero: #030712; --code-bg: #1f2937; --shadow: 0 20px 50px -20px rgba(0, 0, 0, .8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0f17; --surface: #111827; --ink: #f9fafb; --text: #d1d5db; --muted: #9ca3af; --line: #1f2937;
+    --teal-soft: #134e4a; --violet-soft: #2e1065; --amber-soft: #451a03; --rose-soft: #4c0519;
+    --hero: #030712; --code-bg: #1f2937; --shadow: 0 20px 50px -20px rgba(0, 0, 0, .8);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.7 Inter, "Segoe UI", system-ui, sans-serif; }
+  img { max-width: 100%; display: block; }
+  a { color: var(--teal); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+  .wide { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+  header.hero { background: var(--hero); color: var(--hero-text); padding: 72px 0 120px; }
+  .tag { display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+         color: #5eead4; border: 1px solid #134e4a; background: rgba(13, 148, 136, .12); padding: 4px 12px; border-radius: 999px; }
+  h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.08; letter-spacing: -.03em; margin: 20px 0 16px; font-weight: 800; }
+  h1 span { background: linear-gradient(90deg, #5eead4, #a78bfa); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { font-size: clamp(18px, 2.4vw, 21px); color: var(--hero-muted); margin: 0 0 28px; }
+  .meta { font-size: 14px; color: var(--hero-muted); }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 10px; font-weight: 600;
+         text-decoration: none; font-size: 15px; }
+  .btn.primary { background: var(--teal); color: #fff; }
+  .btn.ghost { color: var(--hero-text); border: 1px solid #374151; }
+
+  .shot { margin-top: -80px; }
+  .frame { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); background: #fff; }
+  figcaption { font-size: 14px; color: var(--muted); text-align: center; margin-top: 12px; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 56px 0 8px; }
+  .stat { border-radius: 12px; padding: 18px 16px; text-align: center; }
+  .stat b { display: block; font-size: 28px; line-height: 1.1; letter-spacing: -.02em; }
+  .stat span { font-size: 13px; color: var(--muted); }
+  .s1 { background: var(--teal-soft); } .s1 b { color: var(--teal); }
+  .s2 { background: var(--violet-soft); } .s2 b { color: var(--violet); }
+  .s3 { background: var(--amber-soft); } .s3 b { color: var(--amber); }
+  .s4 { background: var(--rose-soft); } .s4 b { color: var(--rose); }
+
+  article h2 { color: var(--ink); font-size: 28px; letter-spacing: -.02em; line-height: 1.25; margin: 56px 0 12px; }
+  article h3 { color: var(--ink); font-size: 19px; margin: 28px 0 6px; }
+  article p { margin: 0 0 18px; }
+  article ul { padding-left: 22px; margin: 0 0 18px; }
+  article li { margin: 6px 0; }
+  strong { color: var(--ink); }
+  blockquote { margin: 28px 0; padding: 4px 0 4px 20px; border-left: 4px solid var(--violet); font-size: 20px;
+               color: var(--ink); font-weight: 500; }
+  code { font: 14px "JetBrains Mono", Consolas, monospace; background: var(--code-bg); padding: 2px 6px; border-radius: 6px; }
+  pre { background: var(--code-bg); border-radius: 12px; padding: 16px 18px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+
+  .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 24px 0; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 18px; background: var(--surface); }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; font-size: 15px; color: var(--muted); }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: 1px; }
+
+  .pair { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; margin: 32px 0; align-items: start; }
+
+  .closing { background: var(--surface); border-top: 1px solid var(--line); margin-top: 72px; padding: 56px 0 64px; text-align: center; }
+  .closing h2 { margin-top: 0; }
+  .closing .btn.ghost { color: var(--ink); border-color: var(--line); }
+  .closing .cta { justify-content: center; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); padding: 24px 16px 40px; }
+
+  @media (max-width: 720px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .features, .pair { grid-template-columns: 1fr; }
+    header.hero { padding: 48px 0 96px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">Launch · Version 2.0</span>
+    <h1>Meet <span>Simple Sheets</span>: the spreadsheet app that gets out of your way</h1>
+    <p class="lede">A fast, lightweight spreadsheet editor for Windows. It opens Excel, OpenDocument and CSV files in a blink,
+      feels like the tools you already know, and saves your files without wrecking their formatting.</p>
+    <div class="meta">October 2026 · 6 min read</div>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/mudiadamz/simple-sheets">Get it on GitHub →</a>
+      <a class="btn ghost" href="#whats-inside">See what's inside</a>
+    </div>
+  </div>
+</header>
+
+<div class="wide shot">
+  <figure style="margin:0">
+    <div class="frame"><img src="showcase1.jpg" alt="Simple Sheets showing a sales dashboard with KPI cards, a formatted monthly table and charts"></div>
+    <figcaption>A sales dashboard opened in Simple Sheets: formulas, conditional formatting, merged cells and charts, exactly as designed.</figcaption>
+  </figure>
+</div>
+
+<main class="wrap">
+  <div class="stats">
+    <div class="stat s1"><b>0.3 s</b><span>to open the window</span></div>
+    <div class="stat s2"><b>20 MB</b><span>one program, no install needed</span></div>
+    <div class="stat s3"><b>~200</b><span>spreadsheet functions</span></div>
+    <div class="stat s4"><b>800+</b><span>automated tests</span></div>
+  </div>
+
+  <article>
+    <h2>Why build another spreadsheet app?</h2>
+    <p>Most of the time you don't need a full office suite. You need to <strong>open a file someone sent you</strong>,
+      check a few numbers, fix a typo, maybe sort a column, and send it back. For that, waiting for a heavyweight
+      suite to load (or uploading the file to someone's cloud) feels like starting a truck to cross the street.</p>
+    <p>The lightweight alternatives have the opposite problem: they open fast, but the moment you save, the file comes back
+      different. Colours gone. Charts missing. Column widths reset. Your colleague opens it and asks what happened.</p>
+    <blockquote>Simple Sheets is built around one promise: open instantly, edit comfortably, and give the file back the way you found it, plus your changes.</blockquote>
+
+    <h2>Your files stay your files</h2>
+    <p>When Simple Sheets saves a workbook it <strong>patches only what you changed</strong> instead of rebuilding the
+      file from scratch. Fonts, fills, borders, number formats, conditional formatting, data validation, charts,
+      pictures, shapes, sparklines, comments, pivot tables, sheet protection and even workbook passwords all come
+      through a round trip intact.</p>
+    <p>And when a file contains something it genuinely can't keep, it tells you <em>before</em> saving, not after.
+      No silent surprises.</p>
+
+    <div class="pair">
+      <figure style="margin:0">
+        <div class="frame"><img src="showcase2.jpg" alt="An orders table with banded rows, filter buttons, data bars and coloured status cells"></div>
+      </figure>
+      <div>
+        <h3 style="margin-top:0">Real Excel tables, really rendered</h3>
+        <p>Table styles with banded rows, the ▼ filter buttons in the header, data bars inside cells and colour-coded
+          statuses: everything you see here comes straight from the file's own formatting rules.</p>
+        <p>Filter by value, by a condition ("greater than 100", "top 10", "contains…") or simply by colour.</p>
+      </div>
+    </div>
+
+    <h2 id="whats-inside">What's inside</h2>
+    <p>Simple Sheets started as a viewer. Version 2.0 is a complete everyday spreadsheet editor:</p>
+
+    <div class="features">
+      <div class="card"><h3><span class="dot" style="background:var(--teal)"></span>Every common format</h3>
+        <p>Opens .xlsx, .xlsm, .xlsb, .xls, .ods, .csv and templates. Saves .xlsx, .xlsb, .ods and .csv, including password-protected workbooks.</p></div>
+      <div class="card"><h3><span class="dot" style="background:var(--violet)"></span>A real formula engine</h3>
+        <p>Around 200 functions including XLOOKUP, FILTER, UNIQUE, LET and LAMBDA, with dynamic arrays that spill and smart recalculation.</p></div>
+      <div class="card"><h3><span class="dot" style="background:var(--amber)"></span>Analysis built in</h3>
+        <p>Pivot tables saved as real Excel pivots, charts, goal seek, scenarios, data tables and a solver with constraints.</p></div>
+      <div class="card"><h3><span class="dot" style="background:var(--rose)"></span>Print &amp; share</h3>
+        <p>Print preview, PDF of one sheet, all sheets or just the selection, page breaks, HTML export and workbook comparison.</p></div>
+      <div class="card"><h3><span class="dot" style="background:var(--teal)"></span>Import anything</h3>
+        <p>A CSV wizard with encoding, delimiter and column-type preview, and one-click import of a table from any web page.</p></div>
+      <div class="card"><h3><span class="dot" style="background:var(--violet)"></span>Safe by default</h3>
+        <p>Unsaved work is kept every minute and offered back after a crash. It warns when Excel has the file open or a sync folder made a conflict copy.</p></div>
+    </div>
+
+    <h2>Feels familiar on day one</h2>
+    <p>If you've used Excel or Google Sheets, there's nothing to learn. The formula bar, the fill handle that continues
+      <code>1, 2, 3</code> or <code>Mon, Tue, Wed</code>, <code>Ctrl+A</code> to grab the block of data around you,
+      right-click to insert rows, sheet tabs at the bottom, and <code>Ctrl+Z</code> for absolutely everything.</p>
+    <p>A few things we added because we wanted them ourselves:</p>
+    <ul>
+      <li><strong>Command palette</strong> (<code>Ctrl+Shift+P</code>): type a few letters and run any command.</li>
+      <li><strong>Flash fill</strong> (<code>Ctrl+E</code>): type one or two examples and let it finish the column.</li>
+      <li><strong>Evaluate formula</strong>: watch a complicated formula work itself out, step by step.</li>
+      <li><strong>Several workbooks in tabs</strong> in one window, plus a split view for long sheets.</li>
+    </ul>
+
+    <figure style="margin:32px 0">
+      <div class="frame"><img src="showcase3.jpg" alt="A project roadmap with coloured status labels and yellow progress bars"></div>
+      <figcaption>Project tracking with status colours and progress bars, all plain conditional formatting.</figcaption>
+    </figure>
+
+    <h2>Comfortable for everyone</h2>
+    <p>Dark mode and a high-contrast theme. An adjustable interface size for big screens and tired eyes. A colour-blind-safe
+      chart palette. Every action reachable from the keyboard, including picking, moving and resizing charts and pictures.
+      The interface speaks English, Bahasa Indonesia and Español, and anyone can add a language with a small JSON file.</p>
+
+    <h2>Light, private, yours</h2>
+    <p>Simple Sheets is a single 20 MB program. It installs per user without administrator rights, or runs straight
+      from a folder (or a USB stick) in portable mode. There are no accounts, no telemetry, and nothing is uploaded
+      anywhere. Updates are optional; when you turn them on, every download is checked against its SHA-256 checksum
+      before it ever runs.</p>
+    <p>For IT departments, the installer runs silently with <code>/S</code>:</p>
+    <pre><code>SimpleSheets-Setup.exe /S /D=C:\Tools\SimpleSheets /noopenwith</code></pre>
+
+    <h2>Built to be trusted</h2>
+    <p>Under the hood Simple Sheets is plain Python with just two small libraries for reading spreadsheet files. Every
+      change runs through <strong>more than 800 automated tests</strong>, including files that are opened, saved and compared
+      part by part with the original, so "it didn't break my file" isn't a hope, it's checked.</p>
+    <p>It's also open about what isn't finished yet. The installer isn't code-signed yet, so Windows may show a
+      SmartScreen notice the first time. Excel slicers aren't kept on save yet (you'll get a warning). The Linux and macOS builds
+      are still experimental. And full screen-reader support is on the roadmap, with the groundwork already planned.</p>
+
+    <h2>Try it</h2>
+    <p>Grab the installer or the portable zip, open the spreadsheet you've been meaning to look at, and see how fast
+      "just checking something" can be. The project lives on GitHub, where you can read the code, follow the roadmap and
+      report anything that doesn't feel right.</p>
+  </article>
+</main>
+
+<section class="closing">
+  <div class="wrap">
+    <h2>Simple Sheets 2.0 is out now</h2>
+    <p>Fast to open. Familiar to use. Kind to your files.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/mudiadamz/simple-sheets">Download on GitHub →</a>
+      <a class="btn ghost" href="https://github.com/mudiadamz/simple-sheets/blob/main/ROADMAP.md">Read the roadmap</a>
+    </div>
+  </div>
+</section>
+
+<footer>Simple Sheets · Windows 10 / 11 · Made with Python and Tkinter</footer>
+
+</body>
+</html>

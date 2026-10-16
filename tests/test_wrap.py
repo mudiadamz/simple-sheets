@@ -63,7 +63,7 @@ def test_wrap_toggle_from_toolbar(app):
     g.goto(1, 0)
     assert not fb.wrap.get()
     g.goto(0, 0)
-    assert fb.wrap.get() and "Wrap" in app.fmt_info["text"]
+    assert fb.wrap.get() and "Wrap" in __import__("formatting").describe(app.current.styles.get(app.table.cur))
     fb.wrap.set(False)
     fb.toggle_wrap()
     assert g.rh(0) == one_line

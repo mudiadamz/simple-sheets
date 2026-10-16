@@ -8,6 +8,19 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+# Tests never touch the real settings folder (%APPDATA%\SimpleSheets: the user's settings, AI key, recent
+# files): every test - with or without the app window - gets a throw-away one, set before any app module loads.
+import tempfile  # noqa: E402
+
+SAFE_HOME = tempfile.mkdtemp(prefix="ss-test-home-")
+os.environ["SIMPLE_SHEETS_HOME"] = SAFE_HOME
+
+
+@pytest.fixture(autouse=True)
+def _never_real_settings(monkeypatch, tmp_path):
+    """Each test starts with its own empty settings folder (the app fixture may point it elsewhere again)."""
+    monkeypatch.setenv("SIMPLE_SHEETS_HOME", str(tmp_path / "settings-home"))
+
 if sys.platform == "win32":  # same pixel math as the real app
     try:
         import ctypes
@@ -66,6 +79,12 @@ def _reset(a):
     a.full_var.set(False)
     a.show_formulas = False
     a.page_breaks = False
+    if a.value.expanded:
+        a.toggle_formula_bar()
+    pane = a.__dict__.pop("ai_pane", None)
+    if pane is not None and pane.win.winfo_exists():
+        pane.win.destroy()
+    __import__("app_menu").refresh_ai_button(a)
     a.page_breaks_var.set(False)
     a.formulas_var.set(False)
     a.painter = None

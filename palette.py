@@ -113,6 +113,7 @@ TIPS = [
     "View → Page breaks shows where printed pages end; ☰ → Print preview… shows the pages.",
     "Drop a file on the window to open it. Ctrl+T opens a workbook in a tab of this window.",
     "F6 moves between the cells, the formula bar, the name box and the sheet tabs.",
+    "Select a column by its header, then drag the header to move the whole column (rows work the same).",
 ]
 
 

@@ -108,3 +108,24 @@ def test_table_styles(app, tmp_path):
     assert app.save()
     ws = openpyxl.load_workbook(path).active
     assert ws["A1"].fill.fgColor.rgb == "FFED7D31" and ws["A1"].font.b
+
+
+def test_bigger_smaller_text_buttons(app):
+    g, fb = app.table, app.fmtbar
+    app.set_cells([(0, 0, "a"), (0, 1, "b")])
+    g.select(0, 0, 0, 1)
+    fb.step_size(1)                                               # 11 -> 12
+    assert g.style(0, 0)["size"] == 12 and g.style(0, 1)["size"] == 12
+    fb.step_size(1)
+    assert g.style(0, 0)["size"] == 14                             # next standard size
+    for _ in range(3):
+        fb.step_size(-1)
+    assert g.style(0, 0)["size"] == 10
+    g.select(1, 0, 1, 0)
+    app.format_cells(lambda st: {**st, "size": 8.0})
+    fb.step_size(-1)
+    assert g.style(1, 0)["size"] == 7                              # below the list: one point at a time
+    app.undo()
+    assert g.style(1, 0)["size"] == 8
+    texts = [w["text"] for w in fb.winfo_children() if w.winfo_class() == "TButton"]
+    assert "A▴" in texts and "A▾" in texts
