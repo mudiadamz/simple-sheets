@@ -16,6 +16,7 @@ def test_frozen_rows_stay_while_scrolling(app):
     assert g.fr == 2 and g.top >= 2
     for _ in range(5):
         g.on_wheel(type("E", (), {"delta": -120})())
+    app.update()                                            # the wheel redraws once the events are handled
     assert g.top > 10
     rows = g.view[0]
     assert rows[:3] == [0, 1, g.top]                        # rows 1-2 still on top, then the scrolled part

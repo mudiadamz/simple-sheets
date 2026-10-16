@@ -158,6 +158,9 @@ def read_book(path):
             v = getattr(pr, k, None)
             if v:
                 out[k] = str(v)
+        scripts = read_scripts(wb)
+        if scripts:
+            out["scripts"] = scripts
         calc = getattr(wb, "calculation", None)
         if calc is not None:
             if calc.calcMode == "manual":
@@ -171,10 +174,49 @@ def read_book(path):
         wb.close()
 
 
+SCRIPTS_PROP = "SimpleSheets.CellScripts"    # custom document properties: the JSON in 250-character parts
+PART = 250                                    # (Excel keeps custom properties, up to 255 characters each)
+
+
+def read_scripts(wb):
+    """Cell scripts kept in the file: {sheet: {"G2": code}} (cell_scripts.py), or {}."""
+    import json
+    try:
+        props = {p.name: p.value for p in wb.custom_doc_props.props}
+    except AttributeError:
+        return {}
+    parts, i = [], 1
+    while f"{SCRIPTS_PROP}.{i}" in props:
+        parts.append(str(props[f"{SCRIPTS_PROP}.{i}"] or ""))
+        i += 1
+    if not parts:
+        return {}
+    try:
+        data = json.loads("".join(parts))
+    except ValueError:
+        return {}
+    return {str(s): {str(ref): str(code) for ref, code in d.items()} for s, d in data.items()
+            if isinstance(d, dict)} if isinstance(data, dict) else {}
+
+
+def write_scripts(wb, scripts):
+    import json
+
+    from openpyxl.packaging.custom import StringProperty
+    plist = wb.custom_doc_props
+    for p in [p for p in plist.props if p.name.startswith(SCRIPTS_PROP + ".")]:
+        plist.props.remove(p)
+    if scripts:
+        text = json.dumps(scripts, ensure_ascii=False, separators=(",", ":"))
+        for i in range(0, len(text), PART):
+            plist.append(StringProperty(name=f"{SCRIPTS_PROP}.{i // PART + 1}", value=text[i:i + PART]))
+
+
 def apply_book(wb, props):
     pr = wb.properties
     for k in DOC_KEYS:
         setattr(pr, k, props.get(k) or None)
+    write_scripts(wb, props.get("scripts"))
     calc = wb.calculation
     calc.calcMode = "manual" if props.get("calc") == "manual" else "auto"
     calc.iterate = bool(props.get("iterate"))

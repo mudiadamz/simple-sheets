@@ -71,6 +71,164 @@ def parse_date(s):
     return None
 
 
+# ---------- formulas in .xlsx files: newer functions carry Excel's "_xlfn." prefix ----------
+
+FUTURE = set("""CONCAT TEXTJOIN IFS SWITCH MAXIFS MINIFS IFNA XOR DAYS ISOWEEKNUM XLOOKUP XMATCH UNIQUE SORTBY SEQUENCE
+RANDARRAY LET IMAGE TEXTBEFORE TEXTAFTER TEXTSPLIT VSTACK HSTACK TOCOL TOROW WRAPROWS WRAPCOLS TAKE DROP
+CHOOSECOLS CHOOSEROWS EXPAND ARRAYTOTEXT VALUETOTEXT STDEV.S STDEV.P VAR.S VAR.P MODE.SNGL PERCENTILE.INC
+PERCENTILE.EXC QUARTILE.INC QUARTILE.EXC RANK.EQ RANK.AVG NORM.DIST NORM.INV CEILING.MATH FLOOR.MATH
+AGGREGATE FORECAST.LINEAR""".split())
+WORKSHEET_FUTURE = {"FILTER", "SORT"}                 # these are "_xlfn._xlws."
+_STRINGS = re.compile(r'("(?:[^"]|"")*")')
+_PREFIXED = re.compile(r"(?<![\w.])(?:_xlfn\.)?(?:_xlws\.)?(?=[A-Za-z][\w.]*\s*\()")
+_NAMES = re.compile(r"(?<![\w.])([A-Za-z][\w.]*)(?=\s*\()")
+
+
+def from_file(f):
+    """'=_xlfn.XLOOKUP(…)' as stored by Excel -> '=XLOOKUP(…)' (text in quotes untouched)."""
+    return "".join(p if i % 2 else _PREFIXED.sub("", p) for i, p in enumerate(_STRINGS.split(f)))
+
+
+def to_file(f):
+    """'=XLOOKUP(…)' -> '=_xlfn.XLOOKUP(…)' for the file, so Excel knows the newer functions."""
+    def fix(m):
+        name = m.group(1).upper()
+        if name in WORKSHEET_FUTURE:
+            return "_xlfn._xlws." + m.group(1)
+        return "_xlfn." + m.group(1) if name in FUTURE else m.group(1)
+    if "(" not in f:
+        return f
+    return "".join(p if i % 2 else _NAMES.sub(fix, p) for i, p in enumerate(_STRINGS.split(f)))
+
+
+# ---------- dates and times written as text (DATEVALUE, TIMEVALUE, "15 Oct 2026" + 1) ----------
+
+MONTHS = {}
+for _i, _names in enumerate((
+        "january jan januari", "february feb febr februari peb", "march mar maret mrt",
+        "april apr", "may mei", "june jun juni", "july jul juli", "august aug agustus agu agt",
+        "september sep sept", "october oct oktober okt", "november nov nopember", "december dec desember des"),
+        start=1):
+    for _n in _names.split():
+        MONTHS[_n] = _i
+WEEKDAYS = ("monday mon tuesday tue tues wednesday wed thursday thu thur thurs friday fri saturday sat sunday sun "
+            "senin selasa rabu kamis jumat sabtu minggu").split()
+DATE_ORDER = None                  # "dmy" / "mdy" / "ymd" for 3/4/2026; None = Windows' short date setting
+
+_TIME = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*([ap]\.?m\.?)?|(\d{1,2})\s*([ap]\.?m\.?)", re.I)
+
+
+def date_order():
+    """Day / month order for dates like 3/4/2026, from Windows' short date format (else month first)."""
+    global DATE_ORDER
+    if DATE_ORDER:
+        return DATE_ORDER
+    order = "mdy"
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(80)
+        if ctypes.windll.kernel32.GetLocaleInfoEx(None, 0x1F, buf, 80):     # LOCALE_SSHORTDATE, e.g. dd/MM/yyyy
+            first = next((ch for ch in buf.value.lower() if ch in "dmy"), "m")
+            order = {"d": "dmy", "y": "ymd"}.get(first, "mdy")
+    except (AttributeError, OSError):
+        pass
+    DATE_ORDER = order
+    return order
+
+
+def _year(y):
+    y = int(y)
+    return y + (2000 if y < 30 else 1900) if y < 100 else y       # Excel: 00-29 -> 20xx, 30-99 -> 19xx
+
+
+def _split_time(s):
+    """'15 Oct 2026 2:30 PM' -> ('15 Oct 2026', (14, 30, 0)); no time -> (s, None); a bad time -> (s, False)."""
+    found = list(_TIME.finditer(s))
+    m = found[-1] if found else None                                  # the time is at the end
+    if not m or s[m.end():].strip():
+        return s, None
+    if m.group(1):
+        h, mi, sec, ap = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0), m.group(4)
+    else:
+        h, mi, sec, ap = int(m.group(5)), 0, 0, m.group(6)
+    if ap:
+        if not 1 <= h <= 12:
+            return s, False
+        h = h % 12 + (12 if ap.lower().startswith("p") else 0)
+    if h > 23 or mi > 59 or sec > 59:
+        return s, False
+    return s[:m.start()].strip().rstrip(","), (h, mi, sec)
+
+
+def parse_date_text(s, today=None):
+    """A date and/or time written as text, the way Excel's DATEVALUE / TIMEVALUE read it -> datetime or None.
+    "2026-10-15", "15/10/2026" (order from Windows), "2026/10/15", "15 Oct 2026", "15-Oct-26", "Oct 15, 2026",
+    "October 2026" (day 1), "15 Oct" (this year), "Thu, 15 Oct 2026 14:30", "2:30 PM" (time only, day 0);
+    English and Indonesian month names."""
+    s = (s or "").strip()
+    if not s or len(s) > 60:
+        return None
+    iso = parse_date(s)
+    if iso is not None:
+        return iso
+    rest, tm = _split_time(s)
+    if tm is False:
+        return None
+    if not rest:
+        return dt.datetime(1899, 12, 30, *tm) if tm else None          # a time alone: Excel's day 0
+    today = today or dt.date.today()
+    words = [w for w in re.split(r"[\s,./-]+", rest.lower()) if w]
+    if words and words[0].rstrip(".") in WEEKDAYS:                   # "Thu, 15 Oct 2026"
+        words = words[1:]
+    if not words or len(words) > 3:
+        return None
+    names = [i for i, w in enumerate(words) if w.rstrip(".") in MONTHS]
+    nums = [w for w in words if w.isdigit()]
+    if len(names) + len(nums) != len(words) or len(names) > 1:
+        return None
+    try:
+        if names:                                                     # a month name with 1-2 numbers
+            month = MONTHS[words[names[0]].rstrip(".")]
+            if len(nums) == 2:
+                a, b = nums
+                if len(a) == 4:                                       # 2026 Oct 15
+                    y, d = int(a), int(b)
+                elif names[0] == 0:                                   # Oct 15 2026
+                    d, y = int(a), _year(b)
+                else:                                                 # 15 Oct 2026
+                    d, y = int(a), _year(b)
+            elif len(nums) == 1:
+                n = int(nums[0])
+                if len(nums[0]) <= 2 and n <= 31:                     # 15 Oct / Oct 15: this year
+                    d, y = n, today.year
+                else:                                                 # Oct 2026 / Oct-99: the 1st
+                    d, y = 1, _year(nums[0])
+            else:
+                return None
+        else:                                                         # numbers only: 15/10/2026, 2026/10/15
+            if len(nums) == 3:
+                if len(nums[0]) == 4:
+                    y, month, d = int(nums[0]), int(nums[1]), int(nums[2])
+                else:
+                    a, b, y = int(nums[0]), int(nums[1]), _year(nums[2])
+                    order = date_order()
+                    if a > 12 >= b:
+                        d, month = a, b
+                    elif b > 12 >= a:
+                        month, d = a, b
+                    else:
+                        d, month = (a, b) if order == "dmy" else (b, a)
+            elif len(nums) == 2 and all(len(n) <= 2 for n in nums) and re.search(r"[/-]", rest):  # 15/10: this year
+                a, b = int(nums[0]), int(nums[1])
+                d, month = (a, b) if (date_order() == "dmy" or a > 12) and b <= 12 else (b, a)
+                y = today.year
+            else:
+                return None
+        return dt.datetime(y, month, d, *(tm or (0, 0, 0)))
+    except ValueError:                                                # 31 Feb, month 13…
+        return None
+
+
 def general(n):
     if n.is_integer() and abs(n) < 1e15:
         return str(int(n))

@@ -184,7 +184,7 @@ class App(tk.Tk):
         self.bind("<Control-o>", lambda e: self.open_dialog())
         self.bind("<Control-s>", lambda e: self.save())
         self.bind("<Control-S>", lambda e: self.save_as())  # Ctrl+Shift+S
-        self.bind("<Control-p>", lambda e: (self.print_sheet(), "break")[-1])
+        self.bind("<Control-p>", lambda e: (__import__("print_preview").open_preview(self), "break")[-1])  # dialog first
         self.bind("<F11>", lambda e: workbook_tools.toggle_full_screen(self))
         self.bind("<Shift-F3>", lambda e: (__import__("function_help").InsertFunction(self), "break")[-1])
         # keyboard-only use: F10 opens the ☰ menu, Ctrl+PgUp / PgDn change sheet, Shift+F10 = right-click menu
@@ -865,13 +865,18 @@ class App(tk.Tk):
         self.names = dict(names)
         self.engine.set_names(self.names)
 
-    def book_change(self, mutate, select):
-        """Run mutate() (changes self.sheets) as one undo step, then show `select`."""
+    def book_change(self, mutate, select, also=()):
+        """Run mutate() (changes self.sheets) as one undo step, then show `select`.
+        also: more (kind, sheet, r, c, new value) changes made in the same step."""
         self.table.commit()
         before = self.book_state()
         mutate()
         self.select_after = select
-        self.push([("b", None, 0, 0, before, self.book_state(select))])
+        extra = []
+        for kind, sheet, r, c, val in also:
+            extra.append((kind, sheet, r, c, self.read(kind, sheet, r, c), val))
+            self.write_cell(kind, sheet, r, c, val)
+        self.push([("b", None, 0, 0, before, self.book_state(select))] + extra)
 
     def after_book_change(self):
         cur = self.table.sheet
@@ -936,7 +941,9 @@ class App(tk.Tk):
             self.sheets.update(items)
             self.fix_formulas(lambda t: formula.rename_sheet(t, old, new))
             self.names = {k: formula.rename_sheet(t, old, new) for k, t in self.names.items()}
-        self.book_change(mutate, new)
+        import cell_scripts
+        moved = cell_scripts.renamed(self, old, new)          # cell scripts follow their sheet
+        self.book_change(mutate, new, [("wp", None, 0, "scripts", moved)] if moved else ())
         return True
 
     def move_sheet(self, name, index):
@@ -1073,6 +1080,14 @@ class App(tk.Tk):
             note = f" (first {limit:,} only - click to load all)" if limit and rows >= limit else ""
             self.status["text"] = f"{rows:,} rows{note}"
             self.status.configure(cursor="hand2" if note else "")
+            v = g.value(*g.span(*g.cur)[:2])
+            if hasattr(v, "url"):                    # an =IMAGE() cell: say why its picture isn't showing
+                import cell_images
+                st, why = cell_images.state(v.url)
+                if st == "error":
+                    self.status["text"] = f"Picture not shown: {why}"
+                elif st == "loading":
+                    self.status["text"] = "Loading the picture…"
 
     def value_commit(self, _=None):
         g = self.table
@@ -1171,6 +1186,7 @@ class App(tk.Tk):
         """Show a workbook (sheets as on disk) in this window."""
         self.path, self.sheets = path, sheets
         self.formula_home = None
+        self.drive_file = None                     # set again by google_drive.open_drive_file for Drive files
         self.book_props, self.disk_book_props = dict(book_props or {}), dict(book_props or {})
         self.engine.set_iteration(self.book_props)
         if path and path.lower().endswith(".xlsb"):
@@ -1633,6 +1649,8 @@ class App(tk.Tk):
         recovery.discard(self.recovery_id)    # saved: the crash-recovery copy isn't needed
         self.refresh()
         self.status["text"] = f"Saved {os.path.basename(dst)}"
+        import google_drive
+        google_drive.after_save(self, dst)         # opened from Google Drive: it goes back there too
         return True
 
     def formula_results(self):
@@ -1910,7 +1928,7 @@ class App(tk.Tk):
 
     # ---------- PDF / print ----------
 
-    def export_pdf(self, dst=None, what="This sheet"):
+    def export_pdf(self, dst=None, what="This sheet", options=None):
         """The current sheet (or "All sheets" / the "Selection") as a PDF file. Returns the path (None if
         cancelled / failed)."""
         import pdf_export
@@ -1924,20 +1942,20 @@ class App(tk.Tk):
             if not dst:
                 return None
         try:
-            n = pdf_export.export(self, dst, **print_preview.pdf_args(self, what))
+            n = pdf_export.export(self, dst, **print_preview.pdf_args(self, what, options))
         except Exception as e:
             messagebox.showerror("Export failed", str(e))
             return None
         self.status["text"] = f"Exported {os.path.basename(dst)} ({n} page{'s' if n != 1 else ''})"
         return dst
 
-    def print_sheet(self, what="This sheet"):
+    def print_sheet(self, what="This sheet", options=None):
         """Print the current sheet: made into a PDF, sent to the printer by the PDF program."""
         import tempfile
 
         import pdf_export
         dst = os.path.join(tempfile.gettempdir(), f"SimpleSheets-print-{os.getpid()}.pdf")
-        if not self.export_pdf(dst, what):
+        if not self.export_pdf(dst, what, options):
             return None
         how = pdf_export.print_file(dst)
         if how is None:

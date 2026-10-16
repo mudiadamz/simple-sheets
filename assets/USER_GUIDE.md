@@ -77,6 +77,35 @@ rest of an Excel file (charts, pictures, macros, pivot tables) stays as it was.
 - Scripts can do anything Python can on your computer: only run code you trust. Code inside a workbook
   is never run.
 
+## Pictures in cells: =IMAGE()
+
+- `=IMAGE("https://…/logo.png", "Logo")` shows a web picture inside the cell (PNG, GIF, JPEG, BMP…).
+  Optional: sizing 0 = fit keeping its shape (default), 1 = fill the cell, 2 = original size,
+  3 = your own height and width in pixels: `=IMAGE(A2, "Photo", 3, 60, 80)`.
+- The alt text shows while it downloads, when it can't be loaded, and in other formulas, CSV and PDF.
+  Without alt text a picture that can't be loaded shows #picture?; select the cell and the bottom bar says why
+  (e.g. the link is a web page - use the picture's own address: right-click it in the browser → Copy image address).
+- WebP, JPEG, PNG, GIF, BMP, TIFF and HEIC work; SVG drawings don't.
+- Saved so Excel 365 shows it too.
+
+## Google Drive and Google Sheets
+
+- ☰ → Google Drive → Google account…: sign in with Google. The first time, make your own sign-in client
+  (free): in the Google Cloud console enable the Google Drive API, add yourself as a test user on the OAuth
+  consent screen, create an OAuth client ID of type "Desktop app", and paste its Client ID and secret.
+- Sign in opens Google's page in your browser; when it says "Signed in", come back to Simple Sheets.
+- Open from Google Drive…: your spreadsheets, newest first (type to search). A Google Sheet opens as .xlsx;
+  Save (Ctrl+S) puts it back on Drive. Save to Google Drive… uploads a new copy (as a Google Sheet or as the file).
+- The secret and your sign-in are stored encrypted for your Windows account; Sign out removes them.
+
+## Cell scripts (buttons in the sheet)
+
+- Right click a cell → Run a script on click…: write Python (same as Tools → Script; `clicked` is the cell's
+  address). The cell gets a small blue corner and a hand pointer; clicking it runs the script (one Ctrl+Z).
+- Right click again to Edit / Run / Remove it. Scripts can make buttons too: `sheet.on_click("G2", code)`.
+- Saved inside the .xlsx (Excel keeps them, but doesn't run them). A file from somewhere else asks once
+  before its scripts run; changed scripts ask again.
+
 ## AI assistant
 
 - Tools → AI assistant… (Ctrl+Shift+A) opens a pane on the right of the window (Ctrl+Shift+A or ✕ hides it;
@@ -93,19 +122,32 @@ rest of an Excel file (charts, pictures, macros, pivot tables) stays as it was.
   blue", "split the names in column A into first and last name".
 - When cells should change, the AI writes a script. It appears under the chat: read it (you can edit it),
   then press ▶ Run. It's one undo step, and nothing changes if it fails. Nothing runs by itself.
-- Ask / Auto (next to the send button): in Ask mode a script shows as a card (Code ▾ to read it) and runs
+- Auto (the ⚡ icon in the pane's title bar, lit while on; off = Ask): in Ask mode a script shows as a card (Code ▾ to read it) and runs
   when you press ▶ Run; in Auto mode it runs straight away. Either way it's one Ctrl+Z, and a failing
   script changes nothing. ⚙ → Auto model lets OpenRouter pick a model for each question.
-- Chats are kept on this computer: ✎ starts a new one, ↺ lists earlier chats to continue (or clear them).
+- When a script fails, its card says "Script failed" with the error: ↻ Fix it sends the error and the script
+  back to the AI, which answers with a corrected script. In Auto mode this happens by itself (up to 2 tries).
+- Web (the globe icon in the title bar, or + → Search the web): the AI looks things up online before answering
+  ("fill column B with each country's capital", "today's EUR to USD rate in C1") and lists the pages it
+  used as links under the answer. OpenRouter charges a little extra for each search; click Web again to turn it off.
+- Chats are kept on this computer: ✎ starts a new one, ↺ lists earlier chats to continue; the bin
+  on a row deletes that chat, Clear all… deletes every one. The model is chosen in ⚙ (the title's tooltip names it).
+- Long chats and big sheets: each question is fitted to the model's size. A sheet that doesn't fit is sent
+  from the top as far as it fits (a note says so: send only the selection instead); older parts of a long chat
+  are kept as a short summary written by the AI (one extra small request). ✎ starts fresh.
+- ⚙ settings also shows your OpenRouter credits left and what this key spent today / this week / this month
+  (↻ Refresh), and the requests, tokens and cost counted on this computer (Reset sets them to zero).
 - Choose what is sent: the sheet (up to about 3,000 cells) or only the selection. Your question and those
   cells go to OpenRouter and the model's provider. The key is stored encrypted for your Windows account.
 
 ## Printing and exporting
 
-- Print (Ctrl+P) and Export to PDF use the file's page setup: orientation, fit to page, margins,
-  print area and repeated title rows.
+- Print (Ctrl+P) and Export to PDF open the Print dialog first: it shows the pages (this sheet, all sheets
+  or the selection), then Print… or Export PDF….
+- Orientation (Automatic / Portrait / Landscape) and Scaling (Actual size, Fit all columns on one page,
+  Fit the sheet on one page) are set there and remembered. Automatic uses the file's page setup
+  (margins, print area and repeated title rows always come from the file).
 - Export as HTML makes a web page of the current sheet.
-- ☰ → Print preview shows the pages (this sheet, all sheets or the selection); Export all sheets to PDF.
 - View → Page breaks shows where pages end; Sheet → Insert page break adds your own.
 - Files can also be saved as .xlsb (Excel binary).
 

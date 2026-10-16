@@ -21,6 +21,31 @@ def _never_real_settings(monkeypatch, tmp_path):
     """Each test starts with its own empty settings folder (the app fixture may point it elsewhere again)."""
     monkeypatch.setenv("SIMPLE_SHEETS_HOME", str(tmp_path / "settings-home"))
 
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """The AI assistant never reaches OpenRouter from a test: its default transport refuses."""
+    import ai_assist
+
+    def refuse(*a, **k):
+        raise ai_assist.AIError("No network in tests.")
+    real = ai_assist.__dict__.setdefault("real_http", ai_assist.http)   # for tests of http itself (urlopen faked)
+    monkeypatch.setattr(ai_assist, "http", refuse)
+    assert real is not refuse
+    import google_drive  # nor Google: tests give it a fake transport
+
+    def refuse_google(*a, **k):
+        raise google_drive.GoogleError("No network in tests.")
+    monkeypatch.setattr(google_drive, "transport", refuse_google)
+    monkeypatch.setitem(google_drive._access, "token", None)
+    monkeypatch.setitem(google_drive._access, "until", 0.0)
+    import cell_images  # =IMAGE() pictures: tests give their own bytes
+
+    def refuse_image(url, timeout=15):
+        raise OSError("No network in tests.")
+    monkeypatch.setattr(cell_images, "fetch", refuse_image)
+    cell_images.clear()
+
 if sys.platform == "win32":  # same pixel math as the real app
     try:
         import ctypes

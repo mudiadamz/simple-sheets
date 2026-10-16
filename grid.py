@@ -2,6 +2,7 @@
 import csv
 import io
 import re
+import sys
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -421,7 +422,7 @@ class Grid(ttk.Frame):
         else:
             self.top += int(a[1]) * (self.page() if a[2] == "pages" else 1)
         self.clamp_scroll()
-        self.redraw()
+        self.redraw_soon()
 
     def xview(self, *a):
         total = max(self.ncols, self.left + len(self.view[1])) + EXTRA_COLS if self.sheet else 1
@@ -430,7 +431,7 @@ class Grid(ttk.Frame):
         else:
             self.left += int(a[1]) * (max(len(self.view[1]) - 1, 1) if a[2] == "pages" else 1)
         self.clamp_scroll()
-        self.redraw()
+        self.redraw_soon()
 
     # ---------- selection ----------
 
@@ -687,6 +688,9 @@ class Grid(ttk.Frame):
 
     def redraw(self):
         cv = self.cv
+        if getattr(self, "_redraw_job", None) is not None:      # drawn now: the queued redraw isn't needed
+            self._root().after_cancel(self._redraw_job)
+            self._redraw_job = None
         cv.delete("all")
         if not self.sheet:
             return
@@ -716,6 +720,15 @@ class Grid(ttk.Frame):
         xs = {c: (x, w) for c, x, w in cols}
         freeze_y, freeze_x = rh + self.frozen_h(), hw + self.frozen_w()
         self.border_lines = []   # filled by draw_cell, drawn after every cell (so fills can't cover them)
+        self.script_cells = self.app_script_cells()
+        if self.sheet.props.get("grid") is not False:   # gridlines: one long line per row / column, not a box per cell
+            gl = C["grid_line"]
+            right, bottom = min(x, W), min(y, H)
+            for r in rows:
+                yy = ys[r][0] + ys[r][1]
+                cv.create_line(hw, yy, right, yy, fill=gl)
+            for _c, cx, w in cols:
+                cv.create_line(cx + w, rh, cx + w, bottom, fill=gl)
         for r in rows:
             y, h = ys[r]
             for c, x, w in cols:
@@ -791,6 +804,14 @@ class Grid(ttk.Frame):
         total_c = max(self.ncols, self.left + len(cols), 1) + EXTRA_COLS
         self.ys.set(self.top / total_r, (self.top + len(rows)) / total_r)
         self.xs.set(self.left / total_c, (self.left + len(cols)) / total_c)
+
+    def app_script_cells(self):
+        """Cells of this sheet with a click script (cell_scripts.py)."""
+        app = getattr(self, "app", None)
+        if app is None or not getattr(app, "book_props", None) or not app.book_props.get("scripts"):
+            return set()
+        import cell_scripts
+        return cell_scripts.cells(app, self.sheet)
 
     def layout_key(self):
         """What the cells on screen depend on; while it's unchanged only the overlay needs drawing."""
@@ -920,12 +941,18 @@ class Grid(ttk.Frame):
         bg = display_fill(real_bg)                          # dark mode: light fills shown as a dark shade
         if self.multi() and self.in_selection(r, c) and self.span(*self.cur)[:2] != (r, c):
             bg = blend(bg or C["cell_bg"], C["accent"], 0.15)
-        grid = C["grid_line"] if self.sheet.props.get("grid") is not False else (bg or "")
-        cv.create_rectangle(x, y, x + w, y + h, fill=bg or "", outline=grid)
+        if cols is None and not bg:        # a merged block hides the gridlines inside it
+            bg = C["cell_bg"]
+        if bg:                             # plain cells: just the gridlines drawn by redraw
+            grid = C["grid_line"] if self.sheet.props.get("grid") is not False else bg
+            cv.create_rectangle(x, y, x + w, y + h, fill=bg, outline=grid)
         if bar:   # data bar: a coloured bar as long as the value is big
             frac, color = bar
             cv.create_rectangle(x + 2, y + 3, x + 2 + max(int((w - 4) * frac), 1), y + h - 3,
                                 fill=blend(color, C["cell_bg"], 0.45), outline=color, tags="databar")
+        if (r, c) in self.script_cells:     # accent corner = clicking runs its script
+            k = max(self.px(7), 5)
+            cv.create_polygon(x + 1, y + 1, x + k, y + 1, x + 1, y + k, fill=C["accent"], outline="", tags="script")
         if (r, c) in self.sheet.comments:   # red corner = has a comment
             k = max(self.px(6), 5)
             cv.create_polygon(x + w - k, y + 1, x + w - 1, y + 1, x + w - 1, y + k, fill="#d93025",
@@ -933,6 +960,12 @@ class Grid(ttk.Frame):
         for side, line in ((st or {}).get("border") or {}).items():
             self.border_lines.append((side, line, x, y, w, h))
         text = self.value(r, c)
+        if hasattr(text, "url"):                    # =IMAGE(): the picture in the cell (alt text until it's there)
+            import cell_images
+            if cell_images.draw(self, text, x, y, w, h):
+                return
+            st_, _ = cell_images.state(text.url)
+            text = text or ("Loading picture…" if st_ == "loading" else "#picture?")
         if not text:
             return
         disp = render(text, st.get("numfmt")) if st else text
@@ -1048,6 +1081,9 @@ class Grid(ttk.Frame):
             self.commit()
             rect = self.sel() if self.multi() else self.span(*self.cur)
             self.drag = ("move", rect, self.hit(e.x, e.y))
+            at = self.hit(e.x, e.y)               # (not moved in the end: a click, which runs a cell's script)
+            self.script_press = self.span(*at)[:2] if min(at) >= 0 and not (extend or add) and \
+                self.span(*at)[:2] in getattr(self, "script_cells", ()) else None
             return "break"
         self.commit()
         self.cv.focus_set()
@@ -1094,6 +1130,9 @@ class Grid(ttk.Frame):
                 self.ext = (r, c)
             else:
                 self.cur = self.anchor = self.ext = (r, c)
+        # a plain click on a cell with a script runs it when the button comes up on the same cell
+        self.script_press = self.span(r, c)[:2] if r >= 0 and c >= 0 and not (extend or add) and \
+            self.span(r, c)[:2] in getattr(self, "script_cells", ()) else None
         self.redraw()
         self.app.on_select()
         return "break"
@@ -1148,6 +1187,12 @@ class Grid(ttk.Frame):
 
     def on_release(self, e):
         drag, self.drag = self.drag, None
+        pressed, self.script_press = getattr(self, "script_press", None), None
+        at = self.hit(e.x, e.y) if pressed else (-1, -1)
+        clicked = drag == "cells" or (isinstance(drag, tuple) and drag[0] == "move" and drag[2] == at)
+        if pressed and clicked and not self.multi() and min(at) >= 0 and self.span(*at)[:2] == pressed:
+            import cell_scripts  # a click (not a drag) on a script cell: run its script
+            self._root().after_idle(lambda: cell_scripts.run(self.app, *pressed))
         if isinstance(drag, tuple) and drag[0] == "movelines":
             _, axis, a, b, start = drag
             t, self.line_target = getattr(self, "line_target", None), None
@@ -1356,6 +1401,9 @@ class Grid(ttk.Frame):
             self.cv["cursor"] = "crosshair"
         elif self.row_border_at(e.x, e.y) is not None:
             self.cv["cursor"] = "sb_v_double_arrow"
+        elif getattr(self, "script_cells", None) and self.border_at(e.x, e.y) is None and \
+                min(self.hit(e.x, e.y)) >= 0 and self.span(*self.hit(e.x, e.y))[:2] in self.script_cells:
+            self.cv["cursor"] = "hand2"                # a cell that runs a script when clicked
         else:
             self.cv["cursor"] = "sb_h_double_arrow" if self.border_at(e.x, e.y) is not None else ""
 
@@ -1385,14 +1433,35 @@ class Grid(ttk.Frame):
     def on_wheel(self, e, horizontal=False):
         if not self.typing_formula():          # typing "=…": scroll to point at cells further away
             self.commit()
-        step = -1 if e.delta > 0 else 1
+        # a notch (delta 120) = 3 rows; touchpads send small deltas, which add up instead of jumping 3 rows each
+        rows = -e.delta if sys.platform == "darwin" else -e.delta * 3 / 120
+        acc = rows / 3 if horizontal else rows
+        if abs(e.delta) >= 120 or sys.platform == "darwin":                # a notch: always moves, whole rows
+            acc = round(acc) or (1 if acc > 0 else -1)
+        else:
+            acc += getattr(self, "_wheel_acc", 0.0)
+        step = int(acc)
+        self._wheel_acc = acc - step
+        if not step:
+            return "break"
         if horizontal:
             self.left += step
         else:
-            self.top += 3 * step
+            self.top += step
         self.clamp_scroll()
-        self.redraw()
+        self.redraw_soon()
         return "break"
+
+    def redraw_soon(self):
+        """Redraw once the waiting events are handled: a fast wheel / scrollbar drag gives one redraw, not one
+        per event (the redraws queued up and the sheet lagged behind the mouse)."""
+        if getattr(self, "_redraw_job", None) is None:
+            self._redraw_job = self._root().after_idle(self._redraw_now)
+
+    def _redraw_now(self):
+        self._redraw_job = None
+        if self.cv.winfo_exists():
+            self.redraw()
 
     # ---------- keyboard actions ----------
 

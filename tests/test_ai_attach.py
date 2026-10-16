@@ -10,6 +10,7 @@ import pytest
 import ai_assist as ai
 import screen_capture as sc
 import settings
+import theme
 from test_ai_assist import FakeRouter, wait
 
 
@@ -187,7 +188,9 @@ def test_composer_is_one_compact_box(app):
     m = a.plus_menu
     labels = [m.entrycget(i, "label") for i in range(m.index("end") + 1) if m.type(i) != "separator"]
     assert labels == ["Attach a file…", "Capture part of the screen", "Paste a picture (Ctrl+V)",
-                      "Send the sheet", "Send only the selection"]
+                      "Send the sheet", "Send only the selection", "Search the web",
+                      "Scripts: I check them first (Ask)", "Scripts: run automatically (Auto)"]
+    assert not a.composer.find_withtag("chip")                         # Ask / Auto isn't in the question box
     m.invoke(labels.index("Send only the selection") + 1)            # (+1: the separator before the radios)
     assert a.scope.get() == "selection"
     one = int(a.composer.cget("height"))
@@ -216,7 +219,8 @@ def test_composer_is_one_compact_box(app):
 def test_privacy_notice_now_in_settings(app):
     a = ai.Assistant(app, FakeRouter())
     d = a.settings()
-    texts = [w.cget("text") for w in d.win.winfo_children()[0].winfo_children() if w.winfo_class() == "TLabel"]
+    texts = [w.cget("text") for w in d.win.winfo_children()[0].winfo_children()
+             if w.winfo_class() in ("TLabel", "Label")]
     assert any("go to OpenRouter" in str(t) for t in texts)
     d.win.destroy()
     a.win.destroy()
@@ -242,11 +246,44 @@ def test_compact_header(app):
     a = ai.Assistant(app, FakeRouter("x"))
     settings.set("ai_model", "meta/muse-spark-open")
     a.refresh_label()
-    assert a.model_label["text"] == "muse-spark-open ▾"
-    head = a.model_label.master
-    buttons = [w["text"] for w in head.winfo_children() if w.winfo_class() == "TButton"]
-    assert sorted(buttons) == sorted(["✕", "⚙", "↺", "✎"])           # icons only, one row
-    assert not any(w.winfo_class() == "TLabel" and "AI assistant" in str(w["text"]) for w in head.winfo_children())
+    assert a.title_label["text"] == "AI Assistant"                     # the pane's title, not the model
+    assert "meta/muse-spark-open" in a.title_tip.text                  # the model is in its tooltip (and ⚙)
+    head = a.title_label.master
+    assert set(a.icon_buttons) == {"new", "history", "settings", "hide", "auto", "web"}   # icons only, one row
+    assert all(b.master is head for b in a.icon_buttons.values())
+    if ai.icon_font(app):                                              # Windows' icon font: crisp matching icons
+        assert a.icon_buttons["settings"]["text"] == ai.ICONS["settings"]
+        assert a.mode_chip["text"] == ai.ICONS["auto"] and a.web_chip["text"] == ai.ICONS["web"]
+    assert "✕" not in [b["text"] for b in a.icon_buttons.values()]    # no ✕ that looks like "stop"
+    assert not [w for w in head.winfo_children() if w.winfo_class() == "Label" and w["text"] in ("Ask", "Web")]
+    a.win.destroy()
+
+
+def lit(chip):
+    return chip["foreground"] == theme.C["accent"]
+
+
+def test_history_panel_deletes_one_chat(app):
+    a = ai.Assistant(app, FakeRouter("ok"))
+    for q in ("first question", "second question", "third question"):
+        a.new_chat()
+        a.send(q)
+        wait(app, a)
+    chats = ai.list_chats()
+    assert [c["title"] for c in chats] == ["third question", "second question", "first question"]
+    p = a.history_menu(show=False)                                    # built without taking the mouse
+    assert list(p.rows) == [c["id"] for c in chats]
+    assert p.rows[chats[0]["id"]][1]["foreground"] == theme.C["accent"]   # the open chat is marked
+    p.delete(chats[1]["id"])                                          # its bin: just that one goes
+    assert [c["title"] for c in ai.list_chats()] == ["third question", "first question"]
+    assert p.winfo_exists() and chats[1]["id"] not in p.rows          # the list stays open, without it
+    assert "third question" in a.chat.get("1.0", "end")               # another chat: the screen keeps it
+    p.delete(chats[0]["id"])                                          # the chat on screen: starts empty
+    assert a.chat_id is None and a.chat.get("1.0", "end").strip() == ""
+    assert p.open(chats[2]["id"]) and not p.winfo_exists()            # a click on a row opens it, closes the list
+    assert "first question" in a.chat.get("1.0", "end")
+    assert a.history_menu(show=False).winfo_exists()
+    assert a.history_menu(show=False) is None                         # ↺ again closes it
     a.win.destroy()
 
 
@@ -262,9 +299,9 @@ def test_chats_saved_and_reopened(app):
     a.send("second question")
     wait(app, a)
     assert len(ai.list_chats()) == 2
-    m = a.build_history_menu()                                        # (shown by ↺; built here without showing)
-    labels = [m.entrycget(i, "label") for i in range(m.index("end") + 1) if m.type(i) == "command"]
-    assert any("what's the total?" in x for x in labels) and labels[-1] == "Clear history…"
+    p = a.history_menu(show=False)                                    # (shown by ↺; built here without showing)
+    assert len(p.rows) == 2 and any(r[1]["text"] == "what's the total?" for r in p.rows.values())
+    p.destroy()
     assert a.open_chat(first)                                         # reopen: shown again, model remembers it
     text = a.chat.get("1.0", "end")
     assert "what's the total?" in text and "The total is 7." in text and "second question" not in text
@@ -308,11 +345,11 @@ def test_script_card(app):
 def test_auto_mode_runs_scripts_straight_away(app, monkeypatch):
     import tkinter.messagebox as mb
     a = ai.Assistant(app, FakeRouter(SCRIPT_REPLY))
-    assert a.mode_chip["text"] == "Ask"
+    assert not lit(a.mode_chip)
     monkeypatch.setattr(mb, "askyesno", lambda *x, **k: False)
-    assert a.toggle_mode() is False and a.mode_chip["text"] == "Ask"   # said no: stays Ask
+    assert a.toggle_mode() is False and not lit(a.mode_chip)          # said no: stays Ask
     monkeypatch.setattr(mb, "askyesno", lambda *x, **k: True)
-    assert a.toggle_mode() is True and a.mode_chip["text"] == "Auto" and settings.get("ai_auto_run") is True
+    assert a.toggle_mode() is True and lit(a.mode_chip) and settings.get("ai_auto_run") is True
     a.send("format it")
     wait(app, a)
     assert app.table.sheet.freeze == (1, 0) and app.table.text(0, 0) == "Task"     # ran without a click
@@ -390,7 +427,10 @@ def test_working_line_and_stop(app, tmp_path):
         app.update()
         time.sleep(0.03)
     chat = a.chat.get("1.0", "end")
-    assert "Reading INF Sprint 24.csv…" in chat and "●" in chat           # says what it is doing, animated
+    assert "Reading INF Sprint 24.csv…" in chat and "stop" not in chat    # says what it is doing, no stop hint
+    assert a.dots is not None and len(a.dot_items) == 3                  # pulsing dots, one lit at a time
+    lit = [a.dots.itemcget(i, "fill") for i in a.dot_items]
+    assert len(set(lit)) == 2 and lit.count(theme.C["accent"]) == 1
     assert any(a.send_btn.type(i) == "rectangle" for i in a.send_btn.find_all())   # ■ stop button
     assert a.stop() and not a.busy
     time.sleep(1.4)
@@ -399,6 +439,7 @@ def test_working_line_and_stop(app, tmp_path):
         time.sleep(0.02)
     chat = a.chat.get("1.0", "end")
     assert "Stopped." in chat and "late answer" not in chat and "Reading" not in chat   # the late answer is ignored
+    assert a.dots is None and not a.chat.window_names()                 # the dots went with the working line
     assert not any(a.send_btn.type(i) == "rectangle" for i in a.send_btn.find_all())
     router.delay = 0
     router.reply = "fresh answer"
@@ -406,3 +447,43 @@ def test_working_line_and_stop(app, tmp_path):
     wait(app, a)
     assert "fresh answer" in a.chat.get("1.0", "end")
     a.win.destroy()
+
+
+def test_stop_button_is_red_while_working(app):
+    import theme
+    router = SlowRouter("ok")
+    router.delay = 0.6
+    a = ai.Assistant(app, router)
+    a.send("hello")
+    app.update()
+    fills = [a.send_btn.itemcget(i, "fill") for i in a.send_btn.find_all() if a.send_btn.type(i) == "oval"]
+    assert fills == [theme.C["danger"]]                                # red Stop
+    wait(app, a)
+    fills = [a.send_btn.itemcget(i, "fill") for i in a.send_btn.find_all() if a.send_btn.type(i) == "oval"]
+    assert fills == [theme.C["accent"]]                                # back to the blue send button
+    a.win.destroy()
+
+
+def test_mode_from_the_plus_menu(app, monkeypatch):
+    import tkinter.messagebox as mb
+    monkeypatch.setattr(mb, "askyesno", lambda *x, **k: True)
+    a = ai.Assistant(app, FakeRouter("x"))
+    a.set_mode(True)
+    assert a.auto() and lit(a.mode_chip) and a.mode_var.get() == "auto"
+    a.set_mode(False)
+    assert not a.auto() and not lit(a.mode_chip)
+    a.win.destroy()
+
+
+def test_closing_the_pane_cancels_its_timers(app):
+    router = SlowRouter("late")
+    router.delay = 0.5
+    a = ai.Assistant(app, router)
+    a.send("hello")
+    app.update()
+    assert a._timers                                                   # working: timers pending
+    a.win.destroy()
+    assert a._timers == set()                                          # all cancelled with the pane
+    time.sleep(0.7)
+    for _ in range(10):
+        app.update()                                                   # the late answer finds nothing to touch

@@ -5,7 +5,17 @@ import os
 import re
 from itertools import zip_longest
 
-from formatting import DEFAULT_FONT, DEFAULT_SIZE, NUMBER, SIDES, cell_style, parse_date, theme_colors
+from formatting import (
+    DEFAULT_FONT,
+    DEFAULT_SIZE,
+    NUMBER,
+    SIDES,
+    cell_style,
+    from_file,
+    parse_date,
+    theme_colors,
+    to_file,
+)
 
 MAX_ROWS = 50_000  # keep the UI snappy on huge files
 FULL_LOAD_BYTES = 15 * 1024 * 1024  # bigger .xlsx: values only (no column widths / merges)
@@ -83,6 +93,8 @@ def to_value(s):
     """Grid text -> cell value: numbers/ISO dates become typed values, "" becomes empty."""
     if s == "":
         return None
+    if s[:1] == "=":
+        return to_file(s)                      # newer functions get Excel's _xlfn. prefix in the file
     if NUMBER.fullmatch(s):
         return float(s) if any(ch in s for ch in ".eE") else int(s)
     d = parse_date(s)
@@ -107,6 +119,7 @@ def load_xlsx(path, progress=None):
     n_sheets = max(len(wb_v.worksheets), 1)
     for i, (ws_v, ws_f) in enumerate(zip(wb_v.worksheets, wb_f.worksheets)):
         rows, styles, cache, style_cache, links, comments, rich = [], {}, {}, {}, {}, {}, {}
+        arrays = []
         pairs = zip_longest(ws_v.iter_rows(min_row=1, min_col=1),
                             ws_f.iter_rows(min_row=1, min_col=1, values_only=True), fillvalue=())
         expect = min(ws_f.max_row or MAX_ROWS, MAX_ROWS) or 1
@@ -118,9 +131,12 @@ def load_xlsx(path, progress=None):
             row = []
             for c, (cell, f) in enumerate(zip_longest(cells, forms)):
                 v = getattr(cell, "value", None)
+                if getattr(f, "ref", None):      # an array formula over a block: its other cells are its results
+                    arrays.append(f.ref)
                 f = getattr(f, "text", f)   # array formulas
                 if isinstance(f, str) and f.startswith("="):
-                    row.append(f)            # keep the formula; Excel's last result is a fallback
+                    # keep the formula (_xlfn.XLOOKUP -> XLOOKUP); Excel's last result is a fallback
+                    row.append(from_file(f) if "_xl" in f else f)
                     if v is not None:
                         cache[(r, c)] = fmt(v)
                 else:
@@ -138,6 +154,7 @@ def load_xlsx(path, progress=None):
                 if note is not None:
                     comments[(r, c)] = [note.text or "", note.author or ""]
             rows.append(row)
+        clear_array_areas(rows, cache, arrays)
         widths, merges, heights = {}, [], {}
         if full:
             heights = {r - 1: d.ht for r, d in ws_v.row_dimensions.items()
@@ -184,6 +201,27 @@ def load_xlsx(path, progress=None):
     return out
 
 
+def clear_array_areas(rows, cache, refs, start=0):
+    """An array formula ({=UNIQUE(A2:A25)} over E4:E9) keeps its results in the cells it covers; here those
+    cells are filled by the formula itself (it spills), so their stored copies move to the fallback cache
+    instead of blocking it (#SPILL!). rows[0] is sheet row `start`."""
+    from formula import col_index
+    for ref in refs:
+        m = re.fullmatch(r"\$?([A-Za-z]+)\$?(\d+):\$?([A-Za-z]+)\$?(\d+)", ref or "")
+        if not m:
+            continue
+        r1, c1 = int(m.group(2)) - 1, col_index(m.group(1).upper())
+        r2, c2 = int(m.group(4)) - 1, col_index(m.group(3).upper())
+        for r in range(max(r1, start), min(r2, start + len(rows) - 1) + 1):
+            row = rows[r - start]
+            for c in range(c1, min(c2, len(row) - 1) + 1):
+                if (r, c) == (r1, c1) or (row[c][:1] == "=" and len(row[c]) > 1):
+                    continue
+                if row[c] != "":
+                    cache.setdefault((r, c), row[c])
+                    row[c] = ""
+
+
 def load_xlsx_rows(path, sheet_name, start, stop):
     """Rows start..stop-1 of one sheet (for loading more of a long sheet while scrolling).
     -> (rows, styles, cache) with positions counted from the top of the sheet; rows is shorter at the end."""
@@ -197,6 +235,7 @@ def load_xlsx_rows(path, sheet_name, start, stop):
         theme = theme_colors(getattr(wb_v, "loaded_theme", None))
         ws_v, ws_f = wb_v[sheet_name], wb_f[sheet_name]
         rows, styles, cache, style_cache = [], {}, {}, {}
+        arrays = []
         pairs = zip_longest(ws_v.iter_rows(min_row=start + 1, max_row=stop),
                             ws_f.iter_rows(min_row=start + 1, max_row=stop, values_only=True), fillvalue=())
         for k, (cells, forms) in enumerate(pairs):
@@ -204,9 +243,11 @@ def load_xlsx_rows(path, sheet_name, start, stop):
             row = []
             for c, (cell, f) in enumerate(zip_longest(cells, forms)):
                 v = getattr(cell, "value", None)
+                if getattr(f, "ref", None):
+                    arrays.append(f.ref)
                 f = getattr(f, "text", f)
                 if isinstance(f, str) and f.startswith("="):
-                    row.append(f)
+                    row.append(from_file(f) if "_xl" in f else f)   # _xlfn.XLOOKUP -> XLOOKUP
                     if v is not None:
                         cache[(r, c)] = fmt(v)
                 else:
@@ -215,6 +256,7 @@ def load_xlsx_rows(path, sheet_name, start, stop):
                 if st:
                     styles[(r, c)] = st
             rows.append(row)
+        clear_array_areas(rows, cache, arrays, start)
         return rows, styles, cache
     finally:
         wb_v.close()
@@ -948,6 +990,12 @@ def patch_xlsx(src, dst, values, styles, book=None, widths=None, freeze=None, fi
             if is_style:
                 apply_style(cell, v)
             else:
+                old_ref = getattr(cell.value, "ref", None)
+                if old_ref and ":" in old_ref:   # an array formula changed: its stored results go with it
+                    for row in wb[sheet][old_ref]:
+                        for other in row:
+                            if other is not cell and (sheet, other.row - 1, other.column - 1) not in changes:
+                                other.value = None
                 cell.value = to_value(v)
                 if v == "":
                     # an emptied cell loses its link too; otherwise openpyxl puts the link

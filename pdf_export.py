@@ -101,17 +101,18 @@ def split(items, size, room, breaks=()):
     return pages
 
 
-def export(app, dst, sheet_name=None, gridlines=True, sheets=None, area=None):
+def export(app, dst, sheet_name=None, gridlines=True, sheets=None, area=None, orientation=None, fit=None):
     """Write a sheet (or several: sheets=[names]; area=(r1, c1, r2, c2) = only those cells) to `dst` as a PDF.
-    Returns the number of pages."""
+    orientation: None (the file's / automatic), "portrait", "landscape"; fit: None (automatic), "actual",
+    "width" (all columns on one page wide), "page" (the whole sheet on one page). Returns the number of pages."""
     out = []
     for name in sheets or [sheet_name or app.sheet]:
-        p = plan(app, name, area, gridlines)
+        p = plan(app, name, area, gridlines, orientation, fit)
         if sheets and len(sheets) > 1 and not p["rows"]:
             continue                                 # an empty sheet among several: no blank page
         out += [(page_stream_of(p, i), p["page_w"], p["page_h"]) for i in range(len(p["pages"]))]
     if not out:
-        p = plan(app, app.sheet, None, gridlines)
+        p = plan(app, app.sheet, None, gridlines, orientation, fit)
         out = [(page_stream_of(p, 0), p["page_w"], p["page_h"])]
     write_pdf(dst, out)
     return len(out)
@@ -123,7 +124,7 @@ def page_stream_of(p, i):
                        p["measure"], p["scale"], p["page_h"], p["gridlines"], p["origin"])
 
 
-def plan(app, name=None, area=None, gridlines=True):
+def plan(app, name=None, area=None, gridlines=True, orientation=None, fit=None):
     """How a sheet is laid out on paper: page size, scale, and each page's rows and columns.
     Used by the PDF, the print preview and the page-break lines on the grid."""
     name = name or app.sheet
@@ -170,11 +171,15 @@ def plan(app, name=None, area=None, gridlines=True):
     total_w = sum(widths[c] for c in cols) or 1.0
     total_h = sum(heights[r] for r in rows) or 1.0
     page_w, page_h = A4
-    if page.get("orientation") == "landscape" or (not page.get("orientation") and total_w > page_w - left - right):
+    orient = orientation or page.get("orientation")   # chosen in the print dialog, else the file's page setup
+    if orient == "landscape" or (not orient and total_w > page_w - left - right):
         page_w, page_h = A4[1], A4[0]              # landscape (asked for, or the sheet is wide)
     usable_w, usable_h = page_w - left - right, page_h - top - bottom
-    if page.get("fit"):                            # fit to N pages wide / M tall (0 = as many as needed)
-        fw, fh = page["fit"]
+    fit_pages = {"width": (1, 0), "page": (1, 1)}.get(fit) or (None if fit == "actual" else page.get("fit"))
+    if fit == "actual":
+        scale = 1.0
+    elif fit_pages:                                # fit to N pages wide / M tall (0 = as many as needed)
+        fw, fh = fit_pages
         scale = min(1.0, (usable_w * fw / total_w) if fw else 1.0, (usable_h * fh / total_h) if fh else 1.0)
     elif page.get("scale"):
         scale = page["scale"]
@@ -204,9 +209,9 @@ def plan(app, name=None, area=None, gridlines=True):
             "row_starts": [b[0] for b in row_bands[1:] if b], "col_starts": [b[0] for b in col_bands[1:] if b]}
 
 
-def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, measure, scale, page_h, gridlines,
-                origin=(MARGIN, MARGIN)):
-    out = [f"q {scale:.4f} 0 0 {scale:.4f} {origin[0]:.2f} {page_h - origin[1]:.2f} cm".encode()]   # y grows down
+def page_cells(rows, cols, widths, heights, merge_at):
+    """The boxes on one page, in points from its top-left: [(r, c, (x, top, w, h))]; a merged block is one box
+    over its part on this page. Shared by the PDF and the print preview, so both look the same."""
     xs, x = {}, 0.0
     for c in cols:
         xs[c] = x
@@ -216,10 +221,7 @@ def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, meas
         ys[r] = y
         y += heights[r]
 
-    def rect(x, top, w, h, op):
-        return f"{x:.2f} {-(top + h):.2f} {w:.2f} {h:.2f} re {op}".encode()
-
-    cells = []   # (r, c, (x, top, w, h)); a merged block is one box over its part on this page
+    cells = []
     for r in rows:
         for c in cols:
             m = merge_at.get((r, c))
@@ -231,6 +233,69 @@ def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, meas
             if (r, c) == (rr[0], cc[0]):        # first visible cell of the block draws it
                 cells.append((m[0], m[1], (xs[cc[0]], ys[rr[0]], sum(widths[j] for j in cc),
                                            sum(heights[i] for i in rr))))
+    return cells
+
+
+def border_lines(st, box):
+    """A cell's borders: [(x1, y1, x2, y2, line width, dash, colour)] in page points (y grows down)."""
+    x, top, w, h = box
+    out = []
+    for side, (kind, color) in ((st or {}).get("border") or {}).items():
+        lw = 1.5 if kind == "thick" else 1.0 if kind.startswith("medium") else 0.5
+        dash = (2, 2) if kind in ("dotted", "hair") else (4, 2) if "dash" in kind.lower() else ()
+        x1, y1, x2, y2 = {"top": (x, top, x + w, top), "bottom": (x, top + h, x + w, top + h),
+                          "left": (x, top, x, top + h), "right": (x + w, top, x + w, top + h)}[side]
+        out.append((x1, y1, x2, y2, lw, dash, color or "#000000"))
+    return out
+
+
+def cell_text(r, c, box, cols, widths, value, style, merge_at, measure):
+    """How a cell's text sits on the page, or None: {"lines": [(x, baseline y, text)], "size", "bold",
+    "italic", "fg", "underline", "strike", "clip": (x, top, w, h)} — wrapped, clipped and aligned like Excel."""
+    t = value(r, c)
+    if not t:
+        return None
+    x, top, w, h = box
+    st = style(r, c) or {}
+    disp = render(t, st.get("numfmt")) if st.get("numfmt") else t
+    size = float(st.get("size") or DEFAULT_SIZE)
+    bold, italic = bool(st.get("bold")), bool(st.get("italic"))
+    is_num = parse_number(t) is not None
+    align = st.get("align") or ("right" if is_num else "left")
+    pad = 2.0
+    lines = wrap(disp, w - 2 * pad, size, bold, italic, measure) if st.get("wrap") else [disp.split("\n")[0]]
+    room = w
+    if not st.get("wrap"):
+        if align == "left" and (r, c) not in merge_at:   # spill into empty cells on the right
+            for c2 in cols[cols.index(c) + 1:]:
+                if value(r, c2) or (r, c2) in merge_at:
+                    break
+                room += widths[c2]
+        lines = [clip(lines[0], room - 2 * pad, size, bold, italic, measure, is_num)]
+    lead = size * 1.2
+    valign = st.get("valign") or "bottom"
+    block = lead * len(lines)
+    if block > h - pad:                         # more lines than the row holds: show the first ones
+        valign = "top"
+    first = top + (pad + size if valign == "top" else (h - block) / 2 + size if valign == "center"
+                   else h - pad - block + size - 1)
+    placed = []
+    for i, line in enumerate(lines):
+        lw = measure(line, size, bold, italic)
+        lx = x + (w - lw) / 2 if align == "center" else x + w - pad - lw if align == "right" else x + pad
+        placed.append((lx, first + i * lead, line))
+    return {"lines": placed, "size": size, "bold": bold, "italic": italic, "fg": st.get("fg") or "#000000",
+            "underline": bool(st.get("underline")), "strike": bool(st.get("strike")), "clip": (x, top, room, h)}
+
+
+def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, measure, scale, page_h, gridlines,
+                origin=(MARGIN, MARGIN)):
+    out = [f"q {scale:.4f} 0 0 {scale:.4f} {origin[0]:.2f} {page_h - origin[1]:.2f} cm".encode()]   # y grows down
+
+    def rect(x, top, w, h, op):
+        return f"{x:.2f} {-(top + h):.2f} {w:.2f} {h:.2f} re {op}".encode()
+
+    cells = page_cells(rows, cols, widths, heights, merge_at)
     if gridlines:
         out.append(b"0.85 0.85 0.85 RG 0.5 w")
         out += [rect(*b, "S") for _, _, b in cells]
@@ -240,56 +305,29 @@ def page_stream(sheet, rows, cols, widths, heights, value, style, merge_at, meas
             out.append(("%.3f %.3f %.3f rg " % rgb(st["bg"])).encode() + rect(*b, "f"))
             if gridlines:
                 out.append(b"0.85 0.85 0.85 RG 0.5 w " + rect(*b, "S"))
-    for r, c, (x, top, w, h) in cells:              # borders
-        for side, (kind, color) in ((style(r, c) or {}).get("border") or {}).items():
-            lw = 1.5 if kind == "thick" else 1.0 if kind.startswith("medium") else 0.5
-            dash = "[2 2] 0 d" if kind in ("dotted", "hair") else "[4 2] 0 d" if "dash" in kind.lower() else "[] 0 d"
-            x1, y1, x2, y2 = {"top": (x, top, x + w, top), "bottom": (x, top + h, x + w, top + h),
-                              "left": (x, top, x, top + h), "right": (x + w, top, x + w, top + h)}[side]
+    for r, c, box in cells:                         # borders
+        for x1, y1, x2, y2, lw, dash, color in border_lines(style(r, c), box):
+            d = "[%d %d] 0 d" % dash if dash else "[] 0 d"
             out.append(("%.3f %.3f %.3f RG %.2f w %s %.2f %.2f m %.2f %.2f l S" %
-                        (*rgb(color or "#000000"), lw, dash, x1, -y1, x2, -y2)).encode())
+                        (*rgb(color), lw, d, x1, -y1, x2, -y2)).encode())
     out.append(b"[] 0 d")
-    for r, c, (x, top, w, h) in cells:              # text
-        t = value(r, c)
+    for r, c, box in cells:                         # text
+        t = cell_text(r, c, box, cols, widths, value, style, merge_at, measure)
         if not t:
             continue
-        st = style(r, c) or {}
-        disp = render(t, st.get("numfmt")) if st.get("numfmt") else t
-        size = float(st.get("size") or DEFAULT_SIZE)
-        bold, italic = bool(st.get("bold")), bool(st.get("italic"))
-        is_num = parse_number(t) is not None
-        align = st.get("align") or ("right" if is_num else "left")
-        pad = 2.0
-        lines = wrap(disp, w - 2 * pad, size, bold, italic, measure) if st.get("wrap") else [disp.split("\n")[0]]
-        room = w
-        if not st.get("wrap"):
-            if align == "left" and (r, c) not in merge_at:   # spill into empty cells on the right
-                for c2 in cols[cols.index(c) + 1:]:
-                    if value(r, c2) or (r, c2) in merge_at:
-                        break
-                    room += widths[c2]
-            lines = [clip(lines[0], room - 2 * pad, size, bold, italic, measure, is_num)]
-        lead = size * 1.2
-        valign = st.get("valign") or "bottom"
-        block = lead * len(lines)
-        if block > h - pad:                         # more lines than the row holds: show the first ones
-            valign = "top"
+        x, top, room, h = t["clip"]
+        size = t["size"]
         # the text stays inside its cell (or the empty cells it spills into), like Excel
         out.append(("q %.2f %.2f %.2f %.2f re W n" % (x, -(top + h), room, h)).encode())
-        first = top + (pad + size if valign == "top" else (h - block) / 2 + size if valign == "center"
-                       else h - pad - block + size - 1)
-        color = rgb(st["fg"]) if st.get("fg") else (0, 0, 0)
-        out.append(("%.3f %.3f %.3f rg" % color).encode())
-        font = FONTS[(bold, italic)]
-        for i, line in enumerate(lines):
-            lw = measure(line, size, bold, italic)
-            lx = x + (w - lw) / 2 if align == "center" else x + w - pad - lw if align == "right" else x + pad
-            ly = first + i * lead
+        out.append(("%.3f %.3f %.3f rg" % rgb(t["fg"])).encode())
+        font = FONTS[(t["bold"], t["italic"])]
+        for lx, ly, line in t["lines"]:
+            lw = measure(line, size, t["bold"], t["italic"])
             out.append(b"BT /" + font.encode() + (" %.2f Tf %.2f %.2f Td (" % (size, lx, -ly)).encode()
                        + esc(line) + b") Tj ET")
-            if st.get("underline"):
+            if t["underline"]:
                 out.append(("%.2f w %.2f %.2f m %.2f %.2f l S" % (size / 18, lx, -ly - 1.5, lx + lw, -ly - 1.5)).encode())
-            if st.get("strike"):
+            if t["strike"]:
                 out.append(("%.2f w %.2f %.2f m %.2f %.2f l S" % (size / 18, lx, -ly + size * 0.3, lx + lw,
                                                                  -ly + size * 0.3)).encode())
         out.append(b"Q")                            # end of this cell's clip

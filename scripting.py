@@ -513,6 +513,16 @@ class Sheet:
     def tab_color(self, color):
         self._run.write("sp", self._s, 0, "tab", color or None)
 
+    def on_click(self, ref, code):
+        """Clicking the cell runs this code (a button in the sheet): on_click("G2", "sheet['B2'] = 2026").
+        The code gets `clicked` (its cell's address); on_click("G2", None) removes it."""
+        import cell_scripts
+        app = self._run.app
+        r, c, _, _ = self._area(ref)
+        name = cell_scripts.sheet_name(app, self._s)
+        self._run.write("wp", None, 0, "scripts", cell_scripts.changed(app, name, cell_scripts.ref_of(r, c), code))
+        cell_scripts.trust(app)                  # made here, so it may run without asking
+
     # ---- drop-down lists, conditional formatting ----
 
     def dropdown(self, ref, items):

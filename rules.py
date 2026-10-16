@@ -291,7 +291,14 @@ class Rules:
         out = {}
         for d in rules:
             od = (r, c) if d.get("model") else o     # rules made here use the sheet's own positions
-            if not _inside(d["ranges"], od):
+            rs = d["ranges"]
+            boxes = self.__dict__.setdefault("_boxes", {})
+            box = boxes.get(id(d))
+            if box is None or box[0] is not rs:      # outer box of the ranges: a quick "no" while drawing
+                box = boxes[id(d)] = (rs, min((x[0] for x in rs), default=0), min((x[1] for x in rs), default=0),
+                                      max((x[2] for x in rs), default=-1), max((x[3] for x in rs), default=-1))
+            if (od[0] is None or od[1] is None or not box[1] <= od[0] <= box[3] or not box[2] <= od[1] <= box[4]
+                    or not _inside(d["ranges"], od)):
                 continue
             self.fresh()
             hit = self._apply(sheet, d, r, c, od)

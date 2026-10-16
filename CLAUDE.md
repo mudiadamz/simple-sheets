@@ -29,7 +29,7 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
 - `grid.py` — canvas grid: drawing, selection, keyboard/mouse, editor, clipboard, wrapped text
 - `cell_editor.py` — multi-line in-cell editor (Text widget with an Entry-like API)
 - `format_bar.py` — formatting toolbar, table styles
-- `menus.py` — right-click menu
+- `menus.py` — right-click menu; `edit_menu.py` — right-click Cut/Copy/Paste/Select all for text boxes (`attach(widget)`)
 - `structure.py` — insert/delete rows, columns, cells
 - `fill.py` — fill-handle series (numbers, dates, day/month names, "Item 7" text)
 - `formula.py` — formula engine
@@ -76,6 +76,13 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
   Data → Run command on selection (CSV through any program), `--run script.py [file] [--quit]`
 - `ai_assist.py` — Tools → AI assistant (OpenRouter, user's key stored with DPAPI, model picker); the model replies
   with a script for `scripting.run`, shown first and run only on ▶ Run. Tests use a fake transport, never the network
+- `google_drive.py` — sign in with Google (OAuth + PKCE, loopback 127.0.0.1, user's own Desktop client ID/secret,
+  DPAPI-stored refresh token), open / save back / upload Drive spreadsheets (`App.drive_file`; `after_save` in
+  `App.write`). Tests use a fake `google_drive.transport`; conftest blocks the real one
+- `cell_images.py` — =IMAGE() pictures in cells (ImageValue = alt text + url; download thread, GDI+ converts JPEG…);
+  `formatting.to_file` / `from_file` add / remove Excel's `_xlfn.` prefix for newer functions in .xlsx
+- `cell_scripts.py` — a script on a cell runs when it's clicked (book_props["scripts"], "wp" kind; saved as
+  custom document properties `SimpleSheets.CellScripts.N`; scripts from files run only after the user allows them)
 - `structure.move` / `App.move_lines` — drag selected column / row headers to move them (`formula.permute` fixes refs)
 - Portable mode: a `SimpleSheetsData` folder (or `portable.txt`) next to the exe holds the settings (`recent.portable_dir`)
 - Don't write Python containing backslashes or non-ASCII through bash heredocs (they get mangled): use Edit / Write

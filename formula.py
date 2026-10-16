@@ -6,7 +6,7 @@ import re
 import statistics
 from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal
 
-from formatting import EPOCH, fmt_number, parse_date, parse_number, render
+from formatting import EPOCH, fmt_number, parse_date, parse_date_text, parse_number, render
 
 MAXR, MAXC = 1048576, 16384
 
@@ -536,7 +536,7 @@ def num(v):
         n = parse_number(s)
         if n is not None:
             return n
-        d = parse_date(s)
+        d = parse_date(s) or parse_date_text(s)       # "15 Oct 2026" + 1 works, like Excel
         if d is not None:
             return Serial(serial(d))
     raise FormulaError(VALUE)
@@ -556,6 +556,8 @@ def text(v):
         return d.strftime("%Y-%m-%d") if d.time() == dt.time() else d.strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(v, float):
         return str(int(v)) if v.is_integer() and abs(v) < 1e15 else f"{v:.15g}"
+    if isinstance(v, str):
+        return v                       # as it is (an =IMAGE() value keeps its picture for the grid)
     return str(v)
 
 
@@ -650,6 +652,43 @@ def as_rows(v):
     if isinstance(v, Range):
         return [[v.at(i, j) for j in range(v.w)] for i in range(v.h)]
     return [[v]]
+
+
+def is_block(v):
+    """A range / array of more than one value (formulas then work value by value)."""
+    return isinstance(v, Range) and (v.h > 1 or v.w > 1)
+
+
+def pick(rows, i, j):
+    """Value (i, j) of a block, a single row / column repeating across the other way (Excel's broadcasting)."""
+    if len(rows) == 1:
+        i = 0
+    if len(rows[0]) == 1:
+        j = 0
+    return rows[i][j] if i < len(rows) and j < len(rows[i]) else NA
+
+
+def each(v, f):
+    """f applied to every value of a block -> Array (errors stay in their place)."""
+    out = []
+    for row in as_rows(v):
+        line = []
+        for x in row:
+            try:
+                line.append(f(x))
+            except FormulaError as e:
+                line.append(e.err)
+        out.append(line)
+    return Array(out)
+
+
+# one-value functions that work value by value when given a block (Excel's implicit array behaviour)
+LIFTED = set("""TEXT LEN LEFT RIGHT MID UPPER LOWER PROPER TRIM CLEAN VALUE DATEVALUE TIMEVALUE NUMBERVALUE YEAR MONTH DAY
+HOUR MINUTE SECOND WEEKDAY WEEKNUM ISOWEEKNUM EOMONTH EDATE DATE TIME ROUND ROUNDUP ROUNDDOWN INT TRUNC ABS SQRT
+MOD POWER EXP LN LOG LOG10 SIGN CEILING FLOOR CEILING.MATH FLOOR.MATH MROUND EVEN ODD ISNUMBER ISTEXT ISNONTEXT ISBLANK
+ISLOGICAL ISERROR ISERR ISNA ISEVEN ISODD N T SEARCH FIND SUBSTITUTE REPLACE REPT EXACT CHAR CODE UNICHAR
+UNICODE FIXED DOLLAR NOT IF IFERROR IFNA SIN COS TAN RADIANS DEGREES FACT CONCATENATE TEXTBEFORE
+TEXTAFTER""".split())       # (not CONCAT / TEXTJOIN / SUM…: those take whole ranges on purpose)
 
 
 VOLATILE = re.compile(r"\b(NOW|TODAY|RAND|RANDBETWEEN|RANDARRAY|OFFSET|INDIRECT|CELL|INFO)\s*\(|\[", re.I)
@@ -940,10 +979,15 @@ class Engine:
                 return self.cell(name, r1, c1)
             return Range(self, name, r1, c1, r2, c2)
         if kind == "neg":
-            v = num(self.ev(node[1], sheet))
-            return -v
+            v = self.ev(node[1], sheet)
+            if is_block(v):                       # -range / --(A1:A9>5): each value
+                return each(v, lambda x: -num(x))
+            return -num(v)
         if kind == "pct":
-            return num(self.ev(node[1], sheet)) / 100
+            v = self.ev(node[1], sheet)
+            if is_block(v):
+                return each(v, lambda x: num(x) / 100)
+            return num(v) / 100
         if kind == "bin":
             return self.binop(node[1], self.ev(node[2], sheet), self.ev(node[3], sheet))
         if kind == "call":
@@ -959,10 +1003,60 @@ class Engine:
             func, lazy = f
             if lazy == "raw":   # gets the argument expressions themselves (ROW, COLUMN, OFFSET)
                 return func(self, node[2], sheet)
+            if node[1] in LIFTED and node[2]:     # a one-value function given a block: once per value
+                return self.lift_call(func, lazy, node[2], sheet)
             if lazy:
                 return func(self, [(lambda n=n: self.ev(n, sheet)) for n in node[2]])
             return func(self, [self.ev(n, sheet) for n in node[2]])
         raise FormulaError(NAME)
+
+    def lift_call(self, func, lazy, nodes, sheet):
+        """Excel's array rule for one-value functions: TEXT(A2:A500, "yyyy-mm"), LEN(B:B), IF(A1:A9>5, …) give
+        a block with the function applied to each value (SUMPRODUCT / SUM / FILTER… then use it)."""
+        try:
+            first, first_err = self.ev(nodes[0], sheet), None
+        except FormulaError as e:
+            first, first_err = None, e
+        if lazy:                                  # IF / IFERROR…: only the first argument decides
+            if first_err is None and is_block(first):
+                return self.lift(func, True, [first] + [self.ev_value(n, sheet) for n in nodes[1:]])
+
+            def get_first():
+                if first_err is not None:
+                    raise first_err
+                return first
+            return func(self, [get_first] + [(lambda n=n: self.ev(n, sheet)) for n in nodes[1:]])
+        if first_err is not None:
+            raise first_err
+        vals = [first] + [self.ev(n, sheet) for n in nodes[1:]]
+        if any(is_block(v) for v in vals):
+            return self.lift(func, False, vals)
+        return func(self, vals)
+
+    def ev_value(self, node, sheet):
+        try:
+            return self.ev(node, sheet)
+        except FormulaError as e:
+            return e.err
+
+    def lift(self, func, lazy, vals):
+        blocks = [as_rows(v) if is_block(v) else None for v in vals]
+        h = max(len(b) for b in blocks if b)
+        w = max(len(b[0]) for b in blocks if b)
+        out = []
+        for i in range(h):
+            row = []
+            for j in range(w):
+                args = [pick(b, i, j) if b else v for b, v in zip(blocks, vals)]
+                try:
+                    r = func(self, [(lambda x=x: x) for x in args]) if lazy else func(self, args)
+                    if isinstance(r, Range):
+                        r = r.at(0, 0) if r.h == 1 and r.w == 1 else VALUE
+                except FormulaError as e:
+                    r = e.err
+                row.append(r)
+            out.append(row)
+        return Array(out)
 
     def call_lambda(self, fn, arg_nodes, sheet, values=None):
         """Run a LAMBDA with argument expressions (or already calculated `values`)."""
@@ -1039,14 +1133,6 @@ class Engine:
         if big(a) or big(b):              # a block with a value / another block: element by element
             ra, rb = as_rows(a), as_rows(b)
             h, w = max(len(ra), len(rb)), max(len(ra[0]), len(rb[0]))
-
-            def pick(rows, i, j):
-                if len(rows) == 1:
-                    i = 0
-                if len(rows[0]) == 1:
-                    j = 0
-                return rows[i][j] if i < len(rows) and j < len(rows[i]) else NA
-
             out = []
             for i in range(h):
                 row = []
@@ -1548,6 +1634,26 @@ def _isnumber(e, a):
 def _istext(e, a):
     v = a[0].scalar() if isinstance(a[0], Range) else a[0]
     return isinstance(v, str) and not isinstance(v, XLError)
+
+
+@fn("N")
+def _n(e, a):
+    """N(value): a number as it is, TRUE 1, a date its serial, anything else 0 (errors stay errors)."""
+    v = a[0].scalar() if isinstance(a[0], Range) else a[0]
+    if isinstance(v, XLError):
+        raise FormulaError(v)
+    if isinstance(v, bool):
+        return float(v)
+    return v if isinstance(v, (int, float)) else 0.0
+
+
+@fn("T")
+def _t(e, a):
+    """T(value): text as it is, anything else empty text."""
+    v = a[0].scalar() if isinstance(a[0], Range) else a[0]
+    if isinstance(v, XLError):
+        raise FormulaError(v)
+    return v if isinstance(v, str) else ""
 
 
 @fn("ISERROR", lazy=True)

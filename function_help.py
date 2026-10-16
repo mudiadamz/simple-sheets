@@ -83,7 +83,12 @@ HELP = {
     "ISOWEEKNUM": ("Date & time", "ISO week of the year", "=ISOWEEKNUM(A1)"),
     "DAYS": ("Date & time", "Days between two dates", "=DAYS(B1, A1)"),
     "DATEDIF": ("Date & time", "Years / months / days between dates", '=DATEDIF(A1, TODAY(), "Y")'),
-    "DATEVALUE": ("Date & time", "Text to a date", '=DATEVALUE("2026-10-15")'),
+    "DATEVALUE": ("Date & time", "Text to a date", '=DATEVALUE("15 Oct 2026")'),
+    "N": ("Information", "A number as it is (TRUE 1, text 0)", "=N(A1)"),
+    "T": ("Text", "Text as it is (anything else empty)", "=T(A1)"),
+    "IMAGE": ("Lookup", "A picture from the web shown in the cell (sizing 0 fit, 1 fill, 2 original, "
+                                    "3 custom)", '=IMAGE("https://example.com/logo.png", "Logo")'),
+    "TIMEVALUE": ("Date & time", "Text to a time (fraction of a day)", '=TIMEVALUE("2:30 PM")'),
     "EDATE": ("Date & time", "Same day some months later", "=EDATE(A1, 3)"),
     "EOMONTH": ("Date & time", "Last day of a month", "=EOMONTH(A1, 0)"),
     "NETWORKDAYS": ("Date & time", "Working days between dates", "=NETWORKDAYS(A1, B1)"),

@@ -412,11 +412,52 @@ def _time(e, a):
 
 @fn("DATEVALUE")
 def _datevalue(e, a):
+    """A date written as text -> its date serial ("15 Oct 2026", "10/15/2026", "2026-10-15"…; time dropped)."""
     v = num(text(a[0]))
+    if v < 1:                                       # a time alone isn't a date
+        raise FormulaError(VALUE)
     return Serial(math.floor(v))
 
 
+@fn("TIMEVALUE")
+def _timevalue(e, a):
+    """A time written as text -> the fraction of a day ("2:30 PM", "14:30:15", "15 Oct 2026 6:00")."""
+    v = num(text(a[0]))
+    return v - math.floor(v)
+
+
 # ---------- text ----------
+
+@fn("IMAGE")
+def _image(e, a):
+    """IMAGE(source, [alt_text], [sizing], [height], [width]): a web picture shown in the cell (cell_images.py).
+    sizing 0 fit (default), 1 fill, 2 original size, 3 custom height / width in pixels."""
+    from cell_images import ImageValue
+
+    def opt(i):
+        return a[i] if len(a) > i and a[i] is not None and not (isinstance(a[i], str) and a[i] == "") else None
+    url = text(a[0]).strip()
+    if not url:
+        raise FormulaError(VALUE)
+    second = opt(1)
+    if isinstance(second, (int, float)) and not isinstance(second, bool) and second in (1, 2, 3, 4) \
+            and len(a) <= 4:
+        # Google Sheets' IMAGE(url, mode, [height], [width]): 1 fit, 2 stretch, 3 original, 4 custom size
+        height = num(opt(2)) if opt(2) is not None else None
+        width = num(opt(3)) if opt(3) is not None else None
+        if second == 4 and not (height and width and height > 0 and width > 0):
+            raise FormulaError(VALUE)
+        return ImageValue(url, "", int(second) - 1, height, width)
+    alt = text(second) if second is not None else ""
+    sizing = int(num(opt(2))) if opt(2) is not None else 0
+    if sizing not in (0, 1, 2, 3):
+        raise FormulaError(VALUE)
+    height = num(opt(3)) if opt(3) is not None else None
+    width = num(opt(4)) if opt(4) is not None else None
+    if sizing == 3 and not (height and width and height > 0 and width > 0):
+        raise FormulaError(VALUE)
+    return ImageValue(url, alt, sizing, height, width)
+
 
 @fn("CHAR")
 def _char(e, a):

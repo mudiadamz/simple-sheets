@@ -8,7 +8,7 @@ from formula import Engine
 
 STATE = ("path", "sheets", "sheet", "names", "disk_names", "base", "history", "hpos", "disk_sheets", "book_props",
          "disk_book_props", "lost_parts", "lost_ok", "template_src", "encrypted_from", "recovered", "recovered_from",
-         "disk_stamp", "locked", "disk_asked", "recovery_id", "autosaved", "formula_home", "engine")
+         "disk_stamp", "locked", "disk_asked", "recovery_id", "autosaved", "formula_home", "engine", "drive_file")
 
 
 def capture(app):

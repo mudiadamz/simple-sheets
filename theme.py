@@ -14,6 +14,7 @@ LIGHT = {
     "field_bg": "#ffffff", "select_bg": "#cce0ff", "menu_bg": "#f9f9f9", "menu_active": "#d3e3fd",
     "tooltip_bg": "#ffffe0", "tooltip_fg": "#000000",
     "chat_bg": "#f4f6f8", "chat_user": "#dce8fc", "chat_code": "#e6e9ee", "on_accent": "#ffffff",
+    "danger": "#d93025",
 }
 DARK = {
     "dark": True,
@@ -24,6 +25,7 @@ DARK = {
     "field_bg": "#2b2c2f", "select_bg": "#3c4a63", "menu_bg": "#2b2c2f", "menu_active": "#3c4a63",
     "tooltip_bg": "#3c4043", "tooltip_fg": "#e8eaed",
     "chat_bg": "#26282c", "chat_user": "#2d3b52", "chat_code": "#34373c", "on_accent": "#202124",
+    "danger": "#f28b82",
 }
 HIGH = {   # high contrast: white on black, yellow accents, strong lines
     "dark": True, "contrast": True,
@@ -34,6 +36,7 @@ HIGH = {   # high contrast: white on black, yellow accents, strong lines
     "field_bg": "#000000", "select_bg": "#00309c", "menu_bg": "#000000", "menu_active": "#00309c",
     "tooltip_bg": "#000000", "tooltip_fg": "#ffff00",
     "chat_bg": "#000000", "chat_user": "#00265e", "chat_code": "#1c1c1c", "on_accent": "#000000",
+    "danger": "#ff5555",
 }
 C = dict(LIGHT)
 LIGHT_THEME = None   # the platform's native ttk theme, remembered on first use

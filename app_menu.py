@@ -18,13 +18,21 @@ def build(app, parent):
     import book_tabs
     menu.add_command(label="New tab", accelerator="Ctrl+T", command=lambda: book_tabs.new_tab(app))
     menu.add_command(label="Open in new tab…", command=lambda: book_tabs.open_in_tab(app))
+    import google_drive
+    drive = tk.Menu(menu, tearoff=False)
+    drive.add_command(label="Open from Google Drive…", command=lambda: google_drive.open_from_drive(app))
+    drive.add_command(label="Save to Google Drive…", command=lambda: google_drive.save_to_drive(app))
+    drive.add_separator()
+    drive.add_command(label="Google account…", command=lambda: google_drive.AccountDialog(app))
+    menu.add_cascade(label="Google Drive", menu=drive)
     menu.add_separator()
     menu.add_command(label="Save", accelerator="Ctrl+S", command=app.save)
     menu.add_command(label="Save as…", accelerator="Ctrl+Shift+S", command=app.save_as)
     menu.add_command(label="Print preview…", command=lambda: __import__("print_preview").open_preview(app))
-    menu.add_command(label="Export to PDF…", command=app.export_pdf)
-    menu.add_command(label="Export all sheets to PDF…", command=lambda: app.export_pdf(what="All sheets"))
-    menu.add_command(label="Print…", accelerator="Ctrl+P", command=app.print_sheet)
+    menu.add_command(label="Export to PDF…", command=lambda: __import__("print_preview").open_preview(app))
+    menu.add_command(label="Export all sheets to PDF…",
+                     command=lambda: __import__("print_preview").open_preview(app, "All sheets"))
+    menu.add_command(label="Print…", accelerator="Ctrl+P", command=lambda: __import__("print_preview").open_preview(app))
     menu.add_separator()
     import find_replace
     menu.add_command(label="Find…", accelerator="Ctrl+F", command=lambda: find_replace.open_dialog(app))

@@ -133,6 +133,13 @@ def show(app, x_root, y_root):
     m.add_command(label="Edit comment" if has_note else "Insert comment", command=app.edit_comment)
     if has_note:
         m.add_command(label="Delete comment", command=lambda: app.set_comment(*note_cell, ""))
+    import cell_scripts  # a script that runs when the cell is clicked
+    has_script = bool(cell_scripts.get(app, *note_cell))
+    m.add_command(label="Edit cell script…" if has_script else "Run a script on click…",
+                  command=lambda: cell_scripts.open_editor(app, *note_cell))
+    if has_script:
+        m.add_command(label="Run cell script", command=lambda: cell_scripts.run(app, *note_cell))
+        m.add_command(label="Remove cell script", command=lambda: cell_scripts.assign(app, *note_cell, None))
     m.add_separator()
 
     import data_tools

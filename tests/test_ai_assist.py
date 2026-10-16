@@ -152,7 +152,7 @@ def test_settings_dialog(app):
     assert "free" in d.info["text"]
     assert d.save()
     assert ai.load_key() == "sk-new" and settings.get("ai_model") == "free/model"
-    assert a.model_label["text"] == "model ▾"                     # short name (after the provider)
+    assert a.title_tip.text.startswith("Model: free/model")        # the title's tooltip names the model
     a.win.destroy()
     settings.set("ai_key", "")
     settings.set("ai_model", "")
@@ -166,7 +166,7 @@ def test_http_errors_explained(monkeypatch):
         raise urllib.error.HTTPError(req.full_url, 402, "Payment", {}, io.BytesIO(b'{"error": {"message": "no"}}'))
     monkeypatch.setattr(ai.urllib.request, "urlopen", boom)
     with pytest.raises(ai.AIError, match="no credits"):
-        ai.http("POST", "https://openrouter.ai/api/v1/chat/completions", "k", {})
+        ai.real_http("POST", "https://openrouter.ai/api/v1/chat/completions", "k", {})   # (conftest blocks ai.http)
 
 
 def test_pane_docked_right_and_toggles(app, configured):
@@ -250,7 +250,7 @@ def test_only_one_settings_window(app):
         time.sleep(0.02)
     first = a.settings()
     assert a.settings() is first                                  # ⚙ again
-    a.model_label.event_generate("<Button-1>")                    # clicking "Model: …"
+    a.settings()                                                  # ⚙ once more
     ai.open_assistant(app)
     ai.open_assistant(app)                                        # hide / show the pane
     app.update()

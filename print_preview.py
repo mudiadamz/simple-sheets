@@ -2,12 +2,21 @@
 draws where pages end; Sheet → Insert page break adds manual ones, saved in .xlsx as Excel page breaks)."""
 import tkinter as tk
 from tkinter import filedialog, ttk
+from tkinter import font as tkfont
 
 import pdf_export
-from formatting import DEFAULT_SIZE, parse_number, render
 from theme import C
 
 WHAT = ["This sheet", "All sheets", "Selection"]
+ORIENTATIONS = {"Automatic": None, "Portrait": "portrait", "Landscape": "landscape"}
+FITS = {"Automatic": None, "Actual size": "actual", "Fit all columns on one page": "width",
+        "Fit the sheet on one page": "page"}
+
+
+def print_options():
+    """The orientation / scaling chosen last time in the print dialog: {"orientation", "fit"}."""
+    import settings
+    return {"orientation": settings.get("print_orientation"), "fit": settings.get("print_fit")}
 
 
 # ---------- page breaks ----------
@@ -87,19 +96,23 @@ def selection_area(app):
     return r1, c1, r2, c2
 
 
-def pdf_args(app, what):
+def pdf_args(app, what, options=None):
+    """Arguments for pdf_export.export: which sheets / cells, plus orientation and scaling."""
+    opts = dict(print_options() if options is None else options)
     if what == "All sheets":
-        return {"sheets": [n for n, s in app.sheets.items() if not s.hidden]}
-    if what == "Selection":
-        return {"area": selection_area(app)}
-    return {}
+        opts["sheets"] = [n for n, s in app.sheets.items() if not s.hidden]
+    elif what == "Selection":
+        opts["area"] = selection_area(app)
+    return opts
 
 
-def plans(app, what):
+def plans(app, what, options=None):
+    o = print_options() if options is None else options
+    kw = {"orientation": o.get("orientation"), "fit": o.get("fit")}
     if what == "All sheets":
-        out = [pdf_export.plan(app, n) for n, s in app.sheets.items() if not s.hidden]
+        out = [pdf_export.plan(app, n, **kw) for n, s in app.sheets.items() if not s.hidden]
         return [p for p in out if p["rows"]] or out[:1]
-    return [pdf_export.plan(app, None, selection_area(app) if what == "Selection" else None)]
+    return [pdf_export.plan(app, None, selection_area(app) if what == "Selection" else None, **kw)]
 
 
 # ---------- the preview window ----------
@@ -108,7 +121,7 @@ class Preview(tk.Toplevel):
     def __init__(self, app, what="This sheet"):
         super().__init__(app)
         self.app = app
-        self.title("Print preview")
+        self.title("Print")
         self.transient(app)
         self.geometry(f"{int(760 * app.scale)}x{int(900 * app.scale)}")
         bar = ttk.Frame(self, padding=6)
@@ -122,8 +135,22 @@ class Preview(tk.Toplevel):
         self.label.pack(side="left")
         ttk.Button(bar, text="▶", width=3, command=lambda: self.go(1)).pack(side="left")
         ttk.Button(bar, text="Close", command=self.destroy).pack(side="right")
-        ttk.Button(bar, text="Print…", command=self.print_).pack(side="right", padx=4)
+        self.print_btn = ttk.Button(bar, text="Print…", command=self.print_)
+        self.print_btn.pack(side="right", padx=4)
         ttk.Button(bar, text="Export PDF…", command=self.export).pack(side="right")
+        opts = ttk.Frame(self, padding=(6, 0, 6, 6))           # page setup: orientation, scaling
+        opts.pack(fill="x")
+        o = print_options()
+        ttk.Label(opts, text="Orientation").pack(side="left")
+        self.orientation = ttk.Combobox(opts, values=list(ORIENTATIONS), state="readonly", width=11)
+        self.orientation.set(next((k for k, v in ORIENTATIONS.items() if v == o["orientation"]), "Automatic"))
+        self.orientation.pack(side="left", padx=(4, 14))
+        ttk.Label(opts, text="Scaling").pack(side="left")
+        self.fit = ttk.Combobox(opts, values=list(FITS), state="readonly", width=26)
+        self.fit.set(next((k for k, v in FITS.items() if v == o["fit"]), "Automatic"))
+        self.fit.pack(side="left", padx=4)
+        for box in (self.orientation, self.fit):
+            box.bind("<<ComboboxSelected>>", lambda e: self.options_changed())
         self.cv = tk.Canvas(self, background=C["header_bg"], highlightthickness=0)
         self.cv.pack(fill="both", expand=True)
         self.cv.bind("<Configure>", lambda e: self.draw())
@@ -133,8 +160,19 @@ class Preview(tk.Toplevel):
         self.load()
         self.focus_set()
 
+    def options(self):
+        return {"orientation": ORIENTATIONS[self.orientation.get()], "fit": FITS[self.fit.get()]}
+
+    def options_changed(self):
+        import settings
+        o = self.options()
+        settings.set("print_orientation", o["orientation"])       # remembered for the next time
+        settings.set("print_fit", o["fit"])
+        self.load()
+
     def load(self):
-        self.pages = [(p, i) for p in plans(self.app, self.what.get()) for i in range(len(p["pages"]))]
+        self.pages = [(p, i) for p in plans(self.app, self.what.get(), self.options())
+                      for i in range(len(p["pages"]))]
         self.i = 0
         self.draw()
 
@@ -166,49 +204,61 @@ class Preview(tk.Toplevel):
         dst = filedialog.asksaveasfilename(parent=self, filetypes=[("PDF", "*.pdf")], defaultextension=".pdf",
                                            initialfile=f"{stem}.pdf")
         if dst:
-            return self.app.export_pdf(dst, self.what.get())
+            return self.app.export_pdf(dst, self.what.get(), self.options())
         return None
 
     def print_(self):
-        return self.app.print_sheet(self.what.get())
+        return self.app.print_sheet(self.what.get(), self.options())
 
 
 def draw_page(cv, p, i, x0, y0, k):
-    """One page's cells on a canvas: fills, gridlines, borders, text (approximate, for the preview)."""
+    """One page on a canvas, from the same layout as the PDF (pdf_export.page_cells / cell_text): fills,
+    gridlines, borders, wrapped and clipped text. k = screen pixels per point."""
     band_r, band_c = p["pages"][i]
-    xs, x = {}, 0.0
-    for c in band_c:
-        xs[c] = x
-        x += p["widths"][c]
-    ys, y = {}, 0.0
-    for r in band_r:
-        ys[r] = y
-        y += p["heights"][r]
-    for r in band_r:
-        for c in band_c:
-            bx, by = x0 + xs[c] * k, y0 + ys[r] * k
-            bw, bh = p["widths"][c] * k, p["heights"][r] * k
-            st = p["style"](r, c) or {}
-            if st.get("bg") or p["gridlines"]:
-                cv.create_rectangle(bx, by, bx + bw, by + bh, fill=st.get("bg") or "",
-                                    outline="#d9d9d9" if p["gridlines"] else "")
-            for side, (kind, color) in (st.get("border") or {}).items():
-                x1, y1, x2, y2 = {"top": (bx, by, bx + bw, by), "bottom": (bx, by + bh, bx + bw, by + bh),
-                                  "left": (bx, by, bx, by + bh), "right": (bx + bw, by, bx + bw, by + bh)}[side]
-                cv.create_line(x1, y1, x2, y2, fill=color or "#000000", width=2 if "medium" in kind or kind == "thick" else 1)
-            t = p["value"](r, c)
-            if not t:
-                continue
-            disp = render(t, st.get("numfmt")) if st.get("numfmt") else t
-            size = max(int(float(st.get("size") or DEFAULT_SIZE) * k), 1)
-            font = ("Helvetica", -size, ("bold " if st.get("bold") else "") + ("italic" if st.get("italic") else ""))
-            align = st.get("align") or ("right" if parse_number(t) is not None else "left")
-            anchor, tx = {"right": ("e", bx + bw - 2 * k), "center": ("center", bx + bw / 2)}.get(align, ("w", bx + 2 * k))
-            if size >= 3:
-                cv.create_text(tx, by + bh / 2, text=disp.split("\n")[0], anchor=anchor, font=font,
-                               fill=st.get("fg") or "#000000")
+    style, measure = p["style"], p["measure"]
+    cells = pdf_export.page_cells(band_r, band_c, p["widths"], p["heights"], p["merge_at"])
+    for _r, _c, (x, top, w, h) in cells:                     # gridlines under the fills, like the PDF
+        if p["gridlines"]:
+            cv.create_rectangle(x0 + x * k, y0 + top * k, x0 + (x + w) * k, y0 + (top + h) * k, outline="#d9d9d9")
+    for r, c, (x, top, w, h) in cells:
+        bg = (style(r, c) or {}).get("bg")
+        if bg:
+            cv.create_rectangle(x0 + x * k, y0 + top * k, x0 + (x + w) * k, y0 + (top + h) * k, fill=bg,
+                                outline="#d9d9d9" if p["gridlines"] else bg)
+    for r, c, box in cells:
+        for x1, y1, x2, y2, lw, dash, color in pdf_export.border_lines(style(r, c), box):
+            cv.create_line(x0 + x1 * k, y0 + y1 * k, x0 + x2 * k, y0 + y2 * k, fill=color,
+                           width=max(lw * k, 1), dash=dash or None)
+    fonts = {}
+    for r, c, box in cells:
+        t = pdf_export.cell_text(r, c, box, band_c, p["widths"], p["value"], style, p["merge_at"], measure)
+        if not t:
+            continue
+        px = round(t["size"] * k)
+        if px < 3:                                            # too small to read: the page shape is enough
+            continue
+        key = (px, t["bold"], t["italic"])
+        f = fonts.get(key)
+        if f is None:
+            f = fonts[key] = tkfont.Font(root=cv, family="Arial", size=-px, weight="bold" if t["bold"] else "normal",
+                                         slant="italic" if t["italic"] else "roman")
+        ascent = f.metrics("ascent")
+        cx, ctop, room, ch = t["clip"]
+        for lx, ly, line in t["lines"]:
+            if ly - t["size"] * 0.75 > ctop + ch:             # below the cell: cut off, like the PDF
+                break
+            width = lambda s: measure(s, t["size"], t["bold"], t["italic"])   # noqa: E731
+            if lx < cx:                                       # starts left of the cell: drop what's outside
+                right = lx + width(line)
+                while line and width(line) > right - cx:
+                    line = line[1:]
+                lx = right - width(line)
+            line = pdf_export.clip(line, cx + room - lx, t["size"], t["bold"], t["italic"], measure, False)
+            if line:
+                cv.create_text(x0 + lx * k, y0 + ly * k - ascent, text=line, anchor="nw", font=f, fill=t["fg"])
 
 
 def open_preview(app, what="This sheet"):
+    """The print dialog (Ctrl+P, Print…, Export to PDF…): pages shown first, with orientation and scaling."""
     app.table.commit()
     return Preview(app, what)
