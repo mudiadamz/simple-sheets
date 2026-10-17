@@ -1,5 +1,6 @@
 """Google sign-in (OAuth with PKCE on a local address) and Google Drive open / save, against a fake Google."""
 import base64
+import gc
 import hashlib
 import io
 import json
@@ -67,7 +68,12 @@ def google(monkeypatch):
     fake = FakeGoogle()
     monkeypatch.setattr(gd, "transport", fake)
     gd.set_client("123.apps.googleusercontent.com", "shh-secret")
-    return fake
+    # Earlier tests' Tk pictures must not be garbage-collected on the sign-in server's thread: each one makes Tk
+    # wait for a main loop that isn't running in a test, and sign-in timed out on CI. Collect them here, then pause.
+    gc.collect()
+    gc.disable()
+    yield fake
+    gc.enable()
 
 
 def browser_that_signs_in(fake, answer=None):
