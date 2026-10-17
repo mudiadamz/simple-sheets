@@ -79,17 +79,23 @@ def browser_that_signs_in(fake, answer=None):
         fake.challenge = q["code_challenge"]
         back = answer or {"code": "the-code", "state": q["state"]}
 
-        def go():
-            time.sleep(0.1)
-            with urllib.request.urlopen(q["redirect_uri"] + "/?" + urllib.parse.urlencode(back), timeout=5) as r:
-                fake.page = r.read().decode()
+        def go():                    # (slow CI machines: no proxy for the local address, a few tries)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            for _ in range(5):
+                time.sleep(0.1)
+                try:
+                    with opener.open(q["redirect_uri"] + "/?" + urllib.parse.urlencode(back), timeout=20) as r:
+                        fake.page = r.read().decode()
+                    return
+                except OSError:
+                    continue
         threading.Thread(target=go, daemon=True).start()
     return open_browser
 
 
 def test_sign_in_with_pkce_and_keep_it_encrypted(google):
     assert not gd.signed_in()
-    who = gd.sign_in(open_browser=browser_that_signs_in(google), timeout=10)
+    who = gd.sign_in(open_browser=browser_that_signs_in(google), timeout=60)
     assert who == "adam@example.com" and gd.signed_in() and google.verifier_ok
     end = time.time() + 5                     # the 'browser' reads the page on its own thread (slow CI machines)
     while not hasattr(google, "page") and time.time() < end:
@@ -108,7 +114,7 @@ def test_sign_in_with_pkce_and_keep_it_encrypted(google):
 
 def test_sign_in_refuses_a_wrong_state(google):
     with pytest.raises(gd.GoogleError, match="didn't match"):
-        gd.sign_in(open_browser=browser_that_signs_in(google, {"code": "x", "state": "forged"}), timeout=10)
+        gd.sign_in(open_browser=browser_that_signs_in(google, {"code": "x", "state": "forged"}), timeout=60)
     assert not gd.signed_in()
 
 
@@ -122,7 +128,7 @@ def test_sign_in_needs_a_client_and_can_be_cancelled(google):
 
 
 def signed(google):
-    gd.sign_in(open_browser=browser_that_signs_in(google), timeout=10)
+    gd.sign_in(open_browser=browser_that_signs_in(google), timeout=60)
 
 
 def test_list_open_and_save_back(app, google):
