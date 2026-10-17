@@ -208,7 +208,8 @@ def write(path, app):
             m = re.search(r"<(smartTagPr|smartTagTypes|webPublishing|fileRecoveryPr|webPublishObjects|extLst)\b", wb)
             i = m.start() if m else wb.rindex("</workbook>")
             wb = wb[:i] + block + wb[i:]
-        if 'xmlns:r=' not in wb.split(">", 2)[1]:
+        start = re.search(r"<workbook\b[^>]*>", wb)            # (with or without an <?xml …?> line first)
+        if start and 'xmlns:r=' not in start.group():
             wb = re.sub(r"<workbook\b", '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/'
                                         'relationships"', wb, count=1)
         files["xl/workbook.xml"] = wb.encode("utf-8")

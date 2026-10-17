@@ -19,6 +19,37 @@ def sales_book(app, tmp_path):
     return path, g
 
 
+def test_pivot_workbook_xml_without_declaration(app, tmp_path, monkeypatch):
+    """openpyxl without lxml writes workbook.xml with no <?xml …?> line and xmlns:r already on <workbook>: the pivot
+    save must not add xmlns:r a second time (CI once failed on that)."""
+    real = pivots.write
+
+    def write_like_ci(path, app_):
+        with zipfile.ZipFile(path) as z:
+            files = {n: z.read(n) for n in z.namelist()}
+        wb = files["xl/workbook.xml"].decode("utf-8")
+        wb = wb[wb.index("?>") + 2:].lstrip() if wb.startswith("<?xml") else wb
+        if "xmlns:r=" not in wb.split(">", 1)[0]:
+            wb = wb.replace("<workbook", '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/'
+                                         'relationships"', 1)
+        files["xl/workbook.xml"] = wb.encode("utf-8")
+        with zipfile.ZipFile(path, "w") as z:
+            for n, data in files.items():
+                z.writestr(n, data)
+        return real(path, app_)
+    monkeypatch.setattr(pivots, "write", write_like_ci)
+    path, g = sales_book(app, tmp_path)
+    d = data_more.pivot(app)
+    d.boxes["rows"].set("Region")
+    d.boxes["values"].set("Qty")
+    d.ok()
+    assert app.save()
+    with zipfile.ZipFile(path) as z:
+        wbxml = z.read("xl/workbook.xml").decode()
+    assert wbxml.split(">", 1)[0].count("xmlns:r=") == 1
+    openpyxl.load_workbook(path)
+
+
 def test_pivot_saved_as_excel_pivot(app, tmp_path):
     path, g = sales_book(app, tmp_path)
     d = data_more.pivot(app)

@@ -91,6 +91,9 @@ def test_sign_in_with_pkce_and_keep_it_encrypted(google):
     assert not gd.signed_in()
     who = gd.sign_in(open_browser=browser_that_signs_in(google), timeout=10)
     assert who == "adam@example.com" and gd.signed_in() and google.verifier_ok
+    end = time.time() + 5                     # the 'browser' reads the page on its own thread (slow CI machines)
+    while not hasattr(google, "page") and time.time() < end:
+        time.sleep(0.02)
     assert "Signed in" in google.page
     raw = settings.get("google_refresh")
     assert "rt-1" not in raw and "shh-secret" not in settings.get("google_client_secret")   # encrypted
