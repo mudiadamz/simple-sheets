@@ -143,8 +143,13 @@ def test_scrollbar_while_typing_formula(app, tmp_path):
     e = start_formula(app, 1, 1)
     g.yview("scroll", 40, "units")
     g.ys.focus_set()                                      # a click on the scrollbar takes the focus
-    app.update()
-    assert g.editor is e and app.focus_get() is e
+    for _ in range(50):                                   # (the editor takes it back on the next idle)
+        app.update()
+        if app.focus_get() is e:
+            break
+        app.after(20)
+    # on a CI machine the window may not be the active one: then Tk reports where the focus is within it
+    assert g.editor is e and (app.focus_get() or app.focus_lastfor()) is e
     g.commit(cancel=True)
 
 
