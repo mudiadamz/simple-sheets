@@ -2,7 +2,7 @@
 so code written for the one-line formula bar (pointing at cells, reference highlights) works with both."""
 import tkinter as tk
 
-from theme import C
+from simplecore.theme import C
 
 
 class CellEditor(tk.Text):
@@ -53,7 +53,7 @@ class FormulaBar(CellEditor):
     def __init__(self, master, font):
         super().__init__(master, font, wrap=True)
         self.configure(height=1, padx=4, pady=2)
-        import settings
+        from simplecore import settings
         self.expanded = bool(settings.get("formula_bar_expanded", False))
         self.configure(wrap="word" if self.expanded else "none")
         self.bind("<KeyRelease>", lambda e: self.refresh(), add="+")
@@ -79,7 +79,7 @@ class FormulaBar(CellEditor):
             pass
 
     def set_expanded(self, on):
-        import settings
+        from simplecore import settings
         self.expanded = bool(on)
         settings.set("formula_bar_expanded", self.expanded)
         self.configure(wrap="word" if self.expanded else "none")

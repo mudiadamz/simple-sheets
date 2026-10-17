@@ -5,14 +5,13 @@ import json
 import zipfile
 
 import openpyxl
+from simplecore import settings, updates
 
 import help_ui
 import html_export
 import i18n
-import settings
 import settings_ui
 import sheet_io as io
-import updates
 import workbooks
 from conftest import open_in
 

@@ -3,9 +3,10 @@ import re
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from simplecore.theme import C
+
 import formula
 from grid import col_name
-from theme import C
 
 VALID = re.compile(r"[A-Za-z_\\][\w.]*")
 

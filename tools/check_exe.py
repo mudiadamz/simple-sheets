@@ -17,6 +17,8 @@ def main():
     exe = os.path.join(HERE, "dist", "SimpleSheets.exe")
     names = sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(HERE, "*.py")))
     names = [n for n in names if n not in SKIP]
+    import simplecore  # the shared core goes in too (collected by build.bat)
+    names += [f"simplecore.{m}" for m in simplecore.MODULES]
     work = tempfile.mkdtemp(prefix="ss-check-")
     try:
         job = os.path.join(work, "check.py")

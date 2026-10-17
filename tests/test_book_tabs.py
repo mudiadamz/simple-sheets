@@ -1,8 +1,8 @@
 """Several workbooks in one window (tabs), and loading all rows of a long sheet."""
 import openpyxl
+from simplecore import settings
 
 import book_tabs
-import settings
 import sheet_io as io
 import workbooks
 

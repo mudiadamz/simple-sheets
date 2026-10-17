@@ -132,7 +132,7 @@ def test_dark_mode_black_border_visible(app):
     g.goto(0, 0)
     app.fmtbar.borders.apply("all")
     app.set_theme(True)
-    import theme
+    from simplecore import theme
     colours = {g.cv.itemcget(i, "fill") for i in g.cv.find_withtag("border")}
     assert colours == {theme.DARK["cell_fg"]}                 # black lines drawn light in dark mode
     app.set_theme(False)

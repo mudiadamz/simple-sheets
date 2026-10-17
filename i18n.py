@@ -1,8 +1,11 @@
 """Menu translations. The language is chosen in Tools → Settings (takes effect on the next start).
 translate_menu() relabels a built tk.Menu (and its submenus) in place, so menu code stays in English."""
+import version  # noqa: F401  (first: this module reads the settings folder when it loads)
+
+# isort: split
 import re
 
-import settings
+from simplecore import settings
 
 LANGS = {"en": "English", "id": "Bahasa Indonesia", "es": "Español"}
 
@@ -93,8 +96,9 @@ def _merge():
     import json
     import os
 
+    from simplecore.recent import config_dir
+
     import i18n_strings
-    from recent import config_dir
     for table in (i18n_strings.UI, i18n_strings.MENUS):
         for code, words in table.items():
             for k, v in words.items():
@@ -271,3 +275,9 @@ def translate_menu(menu, seen=None):
                 sub = menu.entrycget(i, "menu")
                 if sub:
                     translate_menu(menu.nametowidget(sub), seen)
+
+
+# simplecore's widgets (Tooltip…) translate through this too
+from simplecore import appinfo as _appinfo  # noqa: E402
+
+_appinfo.tr = tr

@@ -3,7 +3,8 @@ import os
 import tkinter as tk
 from tkinter import ttk
 
-import recent
+from simplecore import recent
+from simplecore.ai_button import ai_button, disk_icon, refresh_ai_button, sparkle_icon  # noqa: F401
 
 
 def build(app, parent):
@@ -18,7 +19,7 @@ def build(app, parent):
     import book_tabs
     menu.add_command(label="New tab", accelerator="Ctrl+T", command=lambda: book_tabs.new_tab(app))
     menu.add_command(label="Open in new tab…", command=lambda: book_tabs.open_in_tab(app))
-    import google_drive
+    from simplecore import google_drive
     drive = tk.Menu(menu, tearoff=False)
     drive.add_command(label="Open from Google Drive…", command=lambda: google_drive.open_from_drive(app))
     drive.add_command(label="Save to Google Drive…", command=lambda: google_drive.save_to_drive(app))
@@ -171,73 +172,6 @@ def sync_sheet(app, m):
     m.add_command(label="Remove page breaks", command=lambda: print_preview.remove_breaks(app))
     import i18n
     i18n.translate_menu(m)
-
-
-def disk_icon(master, scale, color):
-    """Floppy disk: coloured body, white shutter at the top, white label at the bottom."""
-    s = max(int(16 * scale), 16)
-    k = s / 16
-    img = tk.PhotoImage(master=master, width=s, height=s)
-
-    def box(x1, y1, x2, y2, c):
-        img.put(c, to=(int(x1 * k), int(y1 * k), max(int(x2 * k), int(x1 * k) + 1), max(int(y2 * k), int(y1 * k) + 1)))
-    box(1, 1, 15, 15, color)          # body
-    box(13, 1, 15, 3, "#ffffff")       # clipped corner
-    box(4, 1, 11, 6, "#ffffff")        # metal shutter
-    box(8, 2, 10, 5, color)            # shutter slot
-    box(3, 9, 13, 15, "#ffffff")       # label
-    box(4, 11, 12, 12, color)          # a line on the label
-    return img
-
-
-def sparkle_icon(master, scale, color, img=None):
-    """A four-pointed sparkle (plus a small one): the AI assistant's mark."""
-    s = max(int(16 * scale), 16)
-    if img is None:
-        img = tk.PhotoImage(master=master, width=s, height=s)
-    else:
-        img.blank()
-    k = s / 16
-
-    def star(cx, cy, r):
-        for t in range(-r, r + 1):
-            w = max(int((r - abs(t)) * 0.3), 0)
-            img.put(color, to=(int(cx - w), int(cy + t), int(cx + w + 1), int(cy + t + 1)))   # up / down arm
-            img.put(color, to=(int(cx + t), int(cy - w), int(cx + t + 1), int(cy + w + 1)))   # left / right arm
-    star(6.5 * k, 9 * k, int(6 * k))
-    star(13 * k, 3 * k, max(int(2.5 * k), 2))
-    return img
-
-
-def ai_button(app, parent):
-    """The toolbar's AI button: coloured, at the right end; opens / hides the assistant pane."""
-    from format_bar import Tooltip
-    b = tk.Label(parent, text=" AI", compound="left", font=("Segoe UI", 10, "bold"), padx=10, pady=1,
-                 cursor="hand2", borderwidth=0)
-    b._own_colors = True                                   # theme.py leaves it alone; refresh_ai_button colours it
-    b.bind("<Button-1>", lambda e: __import__("ai_assist").open_assistant(app))
-    b.bind("<Enter>", lambda e: refresh_ai_button(app, hover=True))
-    b.bind("<Leave>", lambda e: refresh_ai_button(app))
-    b.pack(side="right", padx=(6, 6), pady=(0, 2))
-    Tooltip(b, "AI assistant (Ctrl+Shift+A)")
-    app.ai_btn = b
-    refresh_ai_button(app)
-    return b
-
-
-def refresh_ai_button(app, hover=False):
-    """Colours: accent; darker and 'pressed' while the pane is open (or under the mouse)."""
-    from theme import C, shade
-    b = getattr(app, "ai_btn", None)
-    if b is None or not b.winfo_exists():
-        return
-    pane = getattr(app, "ai_pane", None)
-    open_ = pane is not None and pane.win.winfo_exists() and pane.visible()
-    bg = shade(C["accent"], 0.25) if (open_ or hover) and not C.get("contrast") else C["accent"]
-    app.ai_icon = sparkle_icon(app, app.scale, C["on_accent"], getattr(app, "ai_icon", None))
-    b.configure(image=app.ai_icon, background=bg, foreground=C["on_accent"], relief="sunken" if open_ else "flat",
-                activebackground=bg)
-    b.open = open_
 
 
 def fill_recent(app, menu):

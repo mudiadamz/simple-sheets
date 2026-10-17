@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import openpyxl
 import pytest
+from simplecore import recent
 
-import recent
 import workbooks
 from conftest import key, open_in
 

@@ -1,3 +1,5 @@
+# The shared core (simple-core) is private: CI fetches it with the CORE_TOKEN secret (a fine-grained
+# token with read access to simple-core's contents), pinned in requirements-core.txt.
 # Lint + tests on every push / pull request; builds as downloadable artifacts:
 # Windows (app + installer, signed when the SIGN_CERT_* secrets exist), Linux and macOS (app only).
 name: CI
@@ -34,6 +36,13 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements-dev.txt
+      - name: Shared core (private simple-core, CORE_TOKEN secret)
+        shell: bash
+        env:
+          CORE_TOKEN: ${{ secrets.CORE_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${CORE_TOKEN}@github.com/".insteadOf "https://github.com/"
+          python -m pip install -r requirements-core.txt
       - name: Install
         run: python -m pip install -r requirements-dev.txt
       - name: Test (Windows)
@@ -62,6 +71,13 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements-dev.txt
+      - name: Shared core (private simple-core, CORE_TOKEN secret)
+        shell: bash
+        env:
+          CORE_TOKEN: ${{ secrets.CORE_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${CORE_TOKEN}@github.com/".insteadOf "https://github.com/"
+          python -m pip install -r requirements-core.txt
       - name: Code-signing certificate (optional)
         if: env.HAS_CERT == 'true'
         env:
@@ -97,6 +113,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Shared core (private simple-core, CORE_TOKEN secret)
+        shell: bash
+        env:
+          CORE_TOKEN: ${{ secrets.CORE_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${CORE_TOKEN}@github.com/".insteadOf "https://github.com/"
+          python -m pip install -r requirements-core.txt
       - name: Build
         run: bash build.sh
       - uses: actions/upload-artifact@v4

@@ -7,7 +7,8 @@ scripts written here are trusted. The script gets `clicked` ("G2"), plus everyth
 import hashlib
 import json
 
-import settings
+from simplecore import settings
+
 from formula import col_index, col_letters
 
 TRUST_KEY = "trusted_cell_scripts"
@@ -147,7 +148,7 @@ class Editor:
         import tkinter as tk
         from tkinter import ttk
 
-        from theme import C
+        from simplecore.theme import C
         self.app, self.r, self.c = app, r, c
         self.name = sheet_name(app)
         w = self.win = tk.Toplevel(app)
@@ -165,7 +166,7 @@ class Editor:
                             highlightcolor=C["accent"], padx=6, pady=4)
         self.text.pack(fill="both", expand=True, pady=(8, 8))
         self.text.insert("1.0", get(app, r, c) or EXAMPLE)
-        import edit_menu
+        from simplecore import edit_menu
         edit_menu.attach(self.text)
         b = ttk.Frame(f)
         b.pack(fill="x")

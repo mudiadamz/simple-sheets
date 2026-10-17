@@ -2,9 +2,9 @@
 import time
 
 import pytest
+from simplecore import settings
 
 import ai_assist as ai
-import settings
 from test_ai_assist import FakeRouter, configured, wait  # noqa: F401  (configured is a fixture)
 
 MODEL = "anthropic/test-model"

@@ -1,9 +1,9 @@
 """Right-click edit menu on text boxes, and on the AI pane (chat, question, script code)."""
 import tkinter as tk
 
+from simplecore import edit_menu, screen_capture
+
 import ai_assist as ai
-import edit_menu
-import screen_capture
 from test_ai_assist import FakeRouter
 
 

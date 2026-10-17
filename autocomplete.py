@@ -5,8 +5,9 @@ import re
 import tkinter as tk
 from tkinter import font as tkfont
 
+from simplecore.theme import C
+
 import formula
-from theme import C
 
 SIGNATURES = {
     "SUM": "number1, [number2], …", "AVERAGE": "number1, [number2], …", "MIN": "number1, [number2], …",

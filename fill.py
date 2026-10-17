@@ -37,7 +37,7 @@ LANG_CYCLES = [
 def custom_lists():
     """Your own lists (Tools → Settings → fill lists), e.g. Low, Medium, High."""
     try:
-        import settings
+        from simplecore import settings
         return [list(x) for x in settings.get("fill_lists", []) if len(x) > 1]
     except Exception:
         return []

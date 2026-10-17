@@ -3,7 +3,8 @@ import re
 import tkinter as tk
 import webbrowser
 
-import theme
+from simplecore import theme
+
 from grid import ALL, col_name
 
 ICON = 16

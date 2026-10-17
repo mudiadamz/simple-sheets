@@ -1,8 +1,9 @@
 """AI settings: account credits / spending from OpenRouter, usage counted here, a centred window."""
 import time
 
+from simplecore import settings
+
 import ai_assist as ai
-import settings
 from test_ai_assist import FakeRouter, configured, wait  # noqa: F401  (configured is a fixture)
 
 KEY_INFO = {"data": {"label": "sk-or-v1-abc...", "limit": None, "limit_remaining": None, "usage": 5.79,

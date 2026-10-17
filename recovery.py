@@ -7,7 +7,7 @@ import os
 import sys
 import time
 
-from recent import config_dir
+from simplecore.recent import config_dir
 
 INTERVAL_MS = 60_000
 _ids = itertools.count(1)

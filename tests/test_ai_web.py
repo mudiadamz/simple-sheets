@@ -1,7 +1,7 @@
 """AI assistant: web search (OpenRouter's web plugin), sources as clickable links."""
+from simplecore import settings, theme
+
 import ai_assist as ai
-import settings
-import theme
 from test_ai_assist import FakeRouter, configured, wait  # noqa: F401  (configured is a fixture)
 
 CITED = {"choices": [{"message": {"content": "Bitcoin is about 65,000 USD today.", "annotations": [

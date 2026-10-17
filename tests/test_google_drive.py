@@ -10,13 +10,12 @@ import urllib.request
 
 import openpyxl
 import pytest
-
-import google_drive as gd
-import settings
+from simplecore import google_drive as gd
+from simplecore import settings
 
 ID_TOKEN = "x." + base64.urlsafe_b64encode(json.dumps({"email": "adam@example.com"}).encode()).decode().rstrip("=") + ".y"
-FILES = [{"id": "sheet1", "name": "Budget 2026", "mimeType": gd.SHEET, "modifiedTime": "2026-10-15T09:30:00Z"},
-         {"id": "xl1", "name": "Stock.xlsx", "mimeType": gd.XLSX, "modifiedTime": "2026-10-14T08:00:00Z"}]
+FILES = [{"id": "sheet1", "name": "Budget 2026", "mimeType": gd.NATIVE, "modifiedTime": "2026-10-15T09:30:00Z"},
+         {"id": "xl1", "name": "Stock.xlsx", "mimeType": gd.EXPORT, "modifiedTime": "2026-10-14T08:00:00Z"}]
 
 
 def xlsx_bytes(value):
@@ -59,7 +58,7 @@ class FakeGoogle:
             return 200, b"{}"
         if method == "POST" and url.startswith(gd.UPLOAD + "/files?uploadType=multipart"):
             self.uploads.append((url, data, headers))
-            return 200, json.dumps({"id": "new1", "name": "Copy", "mimeType": gd.SHEET}).encode()
+            return 200, json.dumps({"id": "new1", "name": "Copy", "mimeType": gd.NATIVE}).encode()
         raise AssertionError(url)
 
 
@@ -140,7 +139,7 @@ def test_list_open_and_save_back(app, google):
         time.sleep(0.02)
     app.update()
     url, data, headers = google.uploads[-1]
-    assert "/files/sheet1?uploadType=media" in url and headers["Content-Type"] == gd.XLSX
+    assert "/files/sheet1?uploadType=media" in url and headers["Content-Type"] == gd.EXPORT
     assert openpyxl.load_workbook(io.BytesIO(data)).active["A2"].value == "changed"
     for _ in range(10):
         app.update()
@@ -166,11 +165,11 @@ def test_save_as_new_google_sheet(app, google, tmp_path):
     signed(google)
     path = tmp_path / "Report.xlsx"
     openpyxl.Workbook().save(path)
-    made = gd.create(str(path), "Report", as_sheet=True)
+    made = gd.create(str(path), "Report", as_native=True)
     assert made["id"] == "new1"
     _url, body, headers = google.uploads[-1]
     assert headers["Content-Type"].startswith("multipart/related; boundary=")
-    assert b'"mimeType": "' + gd.SHEET.encode() + b'"' in body and b'"name": "Report"' in body
+    assert b'"mimeType": "' + gd.NATIVE.encode() + b'"' in body and b'"name": "Report"' in body
 
 
 def test_account_dialog(app, google, monkeypatch):

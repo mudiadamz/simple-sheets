@@ -2,9 +2,10 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from simplecore import settings
+
 import i18n
 import recovery
-import settings
 import sheet_io as io
 
 DEFAULTS = {"lang": "en", "recovery_minutes": 1, "max_rows": 50_000, "update_url": "", "check_updates": False,

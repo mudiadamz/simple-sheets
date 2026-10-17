@@ -1,5 +1,6 @@
 """The formula bar: one line (long text scrolls), ▾ expands it; references coloured like the grid outlines."""
-import settings
+from simplecore import settings
+
 from grid import REF_COLORS
 
 

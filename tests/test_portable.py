@@ -1,7 +1,7 @@
 """Portable mode: settings next to the program; no automatic install for a portable copy."""
 import sys
 
-import recent
+from simplecore import recent
 
 
 def test_portable_dir(tmp_path):
@@ -21,7 +21,7 @@ def test_config_dir_follows_portable_exe(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "SimpleSheets.exe"))
     assert recent.config_dir() == str(tmp_path / "SimpleSheetsData")
-    import settings
+    from simplecore import settings
     settings.set("lang", "en")
     assert (tmp_path / "SimpleSheetsData" / "settings.json").exists()
 
@@ -37,7 +37,7 @@ def test_portable_copy_does_not_self_install(app, tmp_path, monkeypatch):
     import hashlib
     import json
 
-    import updates
+    from simplecore import updates
     setup = tmp_path / "Setup.exe"
     setup.write_bytes(b"MZ")
     feed = tmp_path / "f.json"

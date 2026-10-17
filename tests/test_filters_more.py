@@ -68,7 +68,7 @@ def test_custom_sort_order(app):
     g = table(app)
     data_tools.set_criteria(app, 0, None)
     orders = data_tools.custom_orders()
-    import settings
+    from simplecore import settings
     settings.set("fill_lists", [["Low", "Medium", "High"]])
     orders = data_tools.custom_orders()
     key = next(k for k in orders if k.startswith("Low"))

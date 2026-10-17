@@ -167,7 +167,7 @@ def test_orientation_and_scaling(app, tmp_path):
 
 
 def test_dialog_options_used_and_remembered(app, tmp_path, monkeypatch):
-    import settings
+    from simplecore import settings
     wide_sheet(app, cols=3, rows=10)
     w = pp.open_preview(app)
     w.update()

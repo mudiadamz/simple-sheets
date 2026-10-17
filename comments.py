@@ -3,7 +3,7 @@ import getpass
 import tkinter as tk
 from tkinter import ttk
 
-from theme import C
+from simplecore.theme import C
 
 
 def author():

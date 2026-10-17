@@ -3,6 +3,7 @@ rem Builds dist\SimpleSheets.exe (the app) and dist\SimpleSheets-Setup.exe (inst
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 python -m pip install -q -r requirements.txt pyinstaller pillow || exit /b 1
+python -c "import simplecore" || (echo simplecore isn't installed: pip install -e ..\simple-core --config-settings editable_mode=compat & exit /b 1)
 python tools\make_icon.py || exit /b 1
 
 rem Every app module goes in: many are only loaded when a menu item is used (__import__ in a lambda),
@@ -14,7 +15,7 @@ for %%f in ("%~dp0*.py") do (
 
 python -m PyInstaller --noconfirm --onefile --windowed --name SimpleSheets ^
   --icon "%~dp0assets\simple_sheets.ico" --add-data "%~dp0assets;assets" ^
-  --exclude-module pandas --exclude-module numpy --exclude-module PIL !HIDDEN! ^
+  --exclude-module pandas --exclude-module numpy --exclude-module PIL !HIDDEN! --collect-submodules simplecore ^
   --hidden-import statistics --hidden-import random --hidden-import decimal --hidden-import fractions ^
   --hidden-import itertools --hidden-import collections --hidden-import string --hidden-import textwrap ^
   --hidden-import pathlib --hidden-import json --hidden-import math ^
@@ -30,7 +31,7 @@ python -m PyInstaller --noconfirm --onefile --windowed --name SimpleSheets-Setup
 call :sign dist\SimpleSheets-Setup.exe || exit /b 1
 
 rem portable zip (settings next to the exe) + the setup's SHA-256 (checked by automatic updates)
-python tools\package.py || exit /b 1
+python -m simplecore.package SimpleSheets || exit /b 1
 
 echo.
 echo Built: dist\SimpleSheets.exe, dist\SimpleSheets-Setup.exe (+ .sha256 for automatic updates) and dist\SimpleSheets-portable.zip

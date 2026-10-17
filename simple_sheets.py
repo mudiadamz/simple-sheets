@@ -1,4 +1,7 @@
 """Simple Sheets - a tiny spreadsheet viewer/editor for .xlsx / .xls / .ods / .csv files."""
+import version  # noqa: F401  (first: tells simplecore who the app is before any module reads settings)
+
+# isort: split
 import datetime
 import json
 import os
@@ -7,13 +10,14 @@ import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from simplecore import dropfiles, recent, settings, theme
+
 import app_menu
 import autocomplete
 import charts
 import comments
 import data_tools
 import diskwatch
-import dropfiles
 import externals
 import extras
 import fill as fill_series
@@ -22,15 +26,12 @@ import formula
 import images
 import loader
 import menus
-import recent
 import recovery
 import rules
-import settings
 import sheet_io as io
 import sheet_props
 import structure
 import tables
-import theme
 import workbook_tools
 from format_bar import FormatBar, Tooltip
 from formatting import DEFAULT_SIZE, parse_number
@@ -231,7 +232,7 @@ class App(tk.Tk):
         import keyboard_nav  # Ctrl+Alt+5 objects, F6 panes, sheet tabs by keyboard
         keyboard_nav.install(self)
         self.bind("<Control-P>", lambda e: (__import__("palette").open_palette(self), "break")[-1])  # Ctrl+Shift+P
-        self.bind("<Control-Shift-A>", lambda e: (__import__("ai_assist").open_assistant(self), "break")[-1])
+        self.bind("<Control-Shift-A>", lambda e: (self.ai_assistant(), "break")[-1])
         import platform_ui  # macOS: ⌘ works wherever Ctrl does
         platform_ui.mirror_command_keys(self)
         platform_ui.mirror_command_keys(self.table.cv)
@@ -253,9 +254,14 @@ class App(tk.Tk):
             self._drop_frame = frame
             self.drop_enabled = dropfiles.enable(self, self.open_dropped)
 
+    def ai_assistant(self):
+        """Show / hide the AI assistant pane (✦ AI button, Ctrl+Shift+A)."""
+        import ai_assist
+        return ai_assist.open_assistant(self)
+
     def report_callback_exception(self, exc_type, exc, tb):
         """An unexpected error in a click / key handler: show it (Copy details) and log it, keep running."""
-        import crash
+        from simplecore import crash
         crash.report(self, exc_type, exc, tb)
 
     def toggle_dark(self):
@@ -1323,7 +1329,7 @@ class App(tk.Tk):
         Returns the temp file's path, or None if cancelled."""
         import tempfile
 
-        import office_crypto
+        from simplecore import office_crypto
         prompt = f"“{os.path.basename(path)}” is protected with a password.\n\nPassword:"
         while True:
             if password is None:
@@ -1347,7 +1353,7 @@ class App(tk.Tk):
         return tmp
 
     def open_file(self, path, password=None):
-        import office_crypto
+        from simplecore import office_crypto
         real = path
         if path.lower().endswith((".xlsx", ".xlsm", ".xltx", ".xltm")) and office_crypto.is_encrypted(path):
             path = self.unlock(path, password)
@@ -1604,7 +1610,7 @@ class App(tk.Tk):
             except Exception as e:
                 messagebox.showwarning("Save", f"The pivot table couldn't be saved as an Excel pivot:\n{e}")
         if target != dst:
-            import office_crypto
+            from simplecore import office_crypto
             try:
                 office_crypto.encrypt_file(target, dst, password)
             except Exception as e:
@@ -1649,7 +1655,7 @@ class App(tk.Tk):
         recovery.discard(self.recovery_id)    # saved: the crash-recovery copy isn't needed
         self.refresh()
         self.status["text"] = f"Saved {os.path.basename(dst)}"
-        import google_drive
+        from simplecore import google_drive
         google_drive.after_save(self, dst)         # opened from Google Drive: it goes back there too
         return True
 
@@ -1887,7 +1893,7 @@ class App(tk.Tk):
         return help_ui.show(self, what)
 
     def check_updates(self):
-        import updates
+        from simplecore import updates
         return updates.check(self)
 
     def split_window(self):
@@ -2033,7 +2039,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     try:   # a verified update downloaded last time: install it (silently) instead of starting
-        import updates
+        from simplecore import updates
         if getattr(sys, "frozen", False) and updates.apply_pending():
             sys.exit(0)
     except Exception:
@@ -2058,6 +2064,6 @@ if __name__ == "__main__":
         import palette
         app.after(900, lambda: palette.first_run(app))
     if settings.get("check_updates") and settings.get("update_url"):
-        import updates
+        from simplecore import updates
         app.after(3000, lambda: updates.check_in_background(app))
     app.mainloop()

@@ -3,7 +3,7 @@ formatting and layout, as a new untitled workbook — saving asks for a name and
 import os
 from tkinter import filedialog
 
-import recent
+from simplecore import recent
 
 TYPES = [("Excel templates", "*.xltx *.xltm"), ("Workbooks", "*.xlsx *.xlsm"), ("All files", "*.*")]
 

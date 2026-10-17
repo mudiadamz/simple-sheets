@@ -7,8 +7,7 @@ import sys
 import time
 
 import pytest
-
-import screen_capture as sc
+from simplecore import screen_capture as sc
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

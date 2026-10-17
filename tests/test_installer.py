@@ -12,7 +12,7 @@ BASE = r"Software\SimpleSheetsTest"
 
 @pytest.fixture
 def inst(monkeypatch, tmp_path):
-    import installer
+    from simplecore import installer
     fake_exe = tmp_path / "payload.exe"
     fake_exe.write_bytes(b"MZ fake app")
     monkeypatch.setattr(installer, "payload", lambda: str(fake_exe))

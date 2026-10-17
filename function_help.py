@@ -183,7 +183,7 @@ def categories():
 class InsertFunction(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
-        from theme import C
+        from simplecore.theme import C
         self.app = app
         self.title("Insert function")
         self.transient(app)

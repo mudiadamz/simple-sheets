@@ -123,8 +123,9 @@ def test_ctrl_d_and_ctrl_r(app):
 
 
 def test_more_languages_quarters_and_custom_lists(app):
+    from simplecore import settings
+
     import fill
-    import settings
     assert [t for _, t in fill.extend(["Senin"], 2)] == ["Selasa", "Rabu"]
     assert [t for _, t in fill.extend(["enero", "febrero"], 1)] == ["marzo"]
     assert [t for _, t in fill.extend(["Q3"], 3)] == ["Q4", "Q1", "Q2"]

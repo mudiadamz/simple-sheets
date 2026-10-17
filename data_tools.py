@@ -2,9 +2,10 @@
 import tkinter as tk
 from tkinter import ttk
 
+from simplecore.theme import C
+
 import formula
 from grid import col_name
-from theme import C
 
 # ---------- sort ----------
 

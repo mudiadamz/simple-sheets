@@ -765,7 +765,7 @@ SNIPPETS = {
 
 
 def scripts_dir():
-    import recent
+    from simplecore import recent
     d = os.path.join(recent.config_dir(), "scripts")
     os.makedirs(d, exist_ok=True)
     return d
@@ -776,7 +776,7 @@ class ScriptWindow:
         import tkinter as tk
         from tkinter import ttk
 
-        from theme import C
+        from simplecore.theme import C
         self.app, self.path, self.running, self.stop_flag = app, None, False, False
         w = self.win = tk.Toplevel(app)
         w.title("Script")
@@ -951,7 +951,7 @@ def run_command(app, command, timeout=60):
 def run_command_dialog(app):
     from tkinter import messagebox, simpledialog
 
-    import settings
+    from simplecore import settings
     cmd = simpledialog.askstring(
         "Run command on selection",
         "A command that reads CSV on its input and prints CSV, e.g.\n"

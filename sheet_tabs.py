@@ -3,7 +3,7 @@ right-click for add/rename/delete."""
 import tkinter as tk
 from tkinter import ttk
 
-import theme
+from simplecore import theme
 
 DRAG_START = 6   # px the mouse must move before a press becomes a drag
 

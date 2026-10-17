@@ -54,7 +54,7 @@ def test_offer_recovery_restores(app, tmp_path, monkeypatch):
     assert app.path is None and app.dirty() and app.recovered_from == str(path)
     assert not os.path.exists(xlsx) and not recovery.orphans()
     assert os.path.exists(recovery.paths(app.recovery_id)[0])        # own copy straight away
-    import recent
+    from simplecore import recent
     assert xlsx not in recent.load()
 
 

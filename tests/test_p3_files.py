@@ -6,8 +6,8 @@ import zipfile
 
 import openpyxl
 import pytest
+from simplecore import office_crypto
 
-import office_crypto
 import sheet_io as io
 import xlsb
 from conftest import open_in

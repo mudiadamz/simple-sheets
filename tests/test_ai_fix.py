@@ -1,7 +1,7 @@
 """AI assistant: a failing script can go back to the AI with its error (↻ Fix it; Auto mode by itself)."""
+from simplecore import settings, theme
+
 import ai_assist as ai
-import settings
-import theme
 from test_ai_assist import FakeRouter, configured, wait  # noqa: F401  (configured is a fixture)
 
 BAD = "```python\n# Put a total in B1\nsheet['B1'] = totl\n```"

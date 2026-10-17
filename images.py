@@ -51,7 +51,7 @@ def _photo(g, im):
 
 
 def draw_all(g):
-    from theme import C
+    from simplecore.theme import C
     g.image_boxes, g.image_items = [], []
     images = g.sheet.extra.get("images") if g.sheet else None
     if not images:

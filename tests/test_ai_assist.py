@@ -3,9 +3,9 @@ import sys
 import time
 
 import pytest
+from simplecore import settings
 
 import ai_assist as ai
-import settings
 
 
 class FakeRouter:
@@ -181,7 +181,7 @@ def test_pane_docked_right_and_toggles(app, configured):
 
 
 def test_chat_looks_like_a_chat(app, configured):
-    import theme
+    from simplecore import theme
     reply = "Your sheet has **32 providers**:\n\n* **Columns:** No, Code\n* `true` in 30 rows\n# Summary\nAll good."
     a = ai.Assistant(app, FakeRouter(reply))
     a.send("read data")
@@ -220,7 +220,7 @@ def test_hint_in_empty_box(app, configured):
 
 
 def test_pane_follows_theme(app, configured):
-    import theme
+    from simplecore import theme
     a = ai.Assistant(app, FakeRouter("x"))
     app.set_theme(True)
     try:
@@ -268,7 +268,7 @@ def test_key_survives_an_update_and_uninstall(tmp_path, monkeypatch):
     settings folder (outside it) and is encrypted for the Windows user, not for one version."""
     if sys.platform != "win32":
         pytest.skip("Windows installer")
-    import installer
+    from simplecore import installer
     monkeypatch.setenv("SIMPLE_SHEETS_HOME", str(tmp_path / "AppData-SimpleSheets"))
     ai.store_key("sk-or-keep-me")
     settings.set("ai_model", "anthropic/test-model")

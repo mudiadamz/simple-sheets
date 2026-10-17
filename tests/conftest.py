@@ -14,6 +14,7 @@ import tempfile  # noqa: E402
 
 SAFE_HOME = tempfile.mkdtemp(prefix="ss-test-home-")
 os.environ["SIMPLE_SHEETS_HOME"] = SAFE_HOME
+import version  # noqa: E402,F401  (tells simplecore who the app is before any test imports it)
 
 
 @pytest.fixture(autouse=True)
@@ -25,14 +26,18 @@ def _never_real_settings(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
     """The AI assistant never reaches OpenRouter from a test: its default transport refuses."""
+    from simplecore import ai_assist as core_ai
+
     import ai_assist
 
     def refuse(*a, **k):
         raise ai_assist.AIError("No network in tests.")
-    real = ai_assist.__dict__.setdefault("real_http", ai_assist.http)   # for tests of http itself (urlopen faked)
+    real = ai_assist.__dict__.setdefault("real_http", core_ai.http)   # for tests of http itself (urlopen faked)
+    monkeypatch.setattr(core_ai, "http", refuse)
     monkeypatch.setattr(ai_assist, "http", refuse)
+    core_ai.use(ai_assist.SheetsProfile())
     assert real is not refuse
-    import google_drive  # nor Google: tests give it a fake transport
+    from simplecore import google_drive  # nor Google: tests give it a fake transport
 
     def refuse_google(*a, **k):
         raise google_drive.GoogleError("No network in tests.")
@@ -80,8 +85,9 @@ def _reset(a):
     """Back to a just-opened window: one new empty workbook, default view, no dialogs, fresh engine."""
     import inspect
 
+    from simplecore import theme
+
     import recovery
-    import theme
     from formula import Engine
     for obj in (a, a.table, a.tabs):           # methods a test replaced on the object itself (app.dirty = …)
         for k in list(vars(obj)):

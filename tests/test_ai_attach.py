@@ -6,11 +6,10 @@ import time
 import tkinter as tk
 
 import pytest
+from simplecore import screen_capture as sc
+from simplecore import settings, theme
 
 import ai_assist as ai
-import screen_capture as sc
-import settings
-import theme
 from test_ai_assist import FakeRouter, wait
 
 
@@ -154,8 +153,9 @@ def test_capture_snip_and_paste(app, monkeypatch):
 
 
 def test_toolbar_button_toggles_pane(app):
+    from simplecore import theme
+
     import app_menu
-    import theme
     b = app.ai_btn
     assert str(b.cget("background")) == theme.C["accent"] and not b.open
     b.event_generate("<Button-1>")
@@ -450,7 +450,7 @@ def test_working_line_and_stop(app, tmp_path):
 
 
 def test_stop_button_is_red_while_working(app):
-    import theme
+    from simplecore import theme
     router = SlowRouter("ok")
     router.delay = 0.6
     a = ai.Assistant(app, router)

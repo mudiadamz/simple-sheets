@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-import settings
+from simplecore import settings
 
 
 def commands(menu, path=()):

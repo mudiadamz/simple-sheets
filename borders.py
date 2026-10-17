@@ -3,8 +3,9 @@
 import tkinter as tk
 from tkinter import colorchooser, ttk
 
+from simplecore.theme import C
+
 from formatting import BORDER_STYLES
-from theme import C
 
 PLACEMENTS = [("all", "All borders"), ("inner", "Inner borders"), ("horizontal", "Inner horizontal"),
               ("vertical", "Inner vertical"), ("outer", "Outer borders"), ("left", "Left border"),

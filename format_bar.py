@@ -2,9 +2,11 @@
 import tkinter as tk
 from tkinter import colorchooser, ttk
 
+from simplecore.theme import C
+from simplecore.widgets import Tooltip  # noqa: F401  (others import it from here)
+
 from borders import BorderButton
 from formatting import DEFAULT_FONT, DEFAULT_SIZE, FONT_KEYS, NUMBER_FORMATS, PRESETS, change_decimals, tint
-from theme import C
 
 SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36]
 TABLE_COLORS = {"Blue": "4472C4", "Orange": "ED7D31", "Green": "70AD47", "Gold": "FFC000",
@@ -16,31 +18,6 @@ def table_colors(color, light):
     if light:
         return tint(color, 0.6), tint(color, 0.85)
     return "#" + color.lower(), tint(color, 0.8)
-
-
-class Tooltip:
-    def __init__(self, widget, text):
-        self.widget, self.text, self.tip = widget, text, None
-        widget.bind("<Enter>", self.show, add="+")
-        widget.bind("<Leave>", self.hide, add="+")
-        widget.bind("<ButtonPress>", self.hide, add="+")
-
-    def show(self, _=None):
-        if self.tip:
-            return
-        x = self.widget.winfo_rootx()
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 2
-        self.tip = tk.Toplevel(self.widget)
-        self.tip.wm_overrideredirect(True)
-        self.tip.wm_geometry(f"+{x}+{y}")
-        import i18n
-        tk.Label(self.tip, text=i18n.tr(self.text), bg=C["tooltip_bg"], fg=C["tooltip_fg"], relief="solid", bd=1,
-                 padx=4).pack()
-
-    def hide(self, _=None):
-        if self.tip:
-            self.tip.destroy()
-            self.tip = None
 
 
 COMMON_FONTS = ["Calibri", "Arial", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Courier New",

@@ -7,11 +7,12 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
+from simplecore.theme import C, display_fill, near_black, text_color
+
 import autocomplete
 from cell_editor import CellEditor
 from formatting import DEFAULT_SIZE, parse_number, render
 from formula import quote_sheet, references, shift
-from theme import C, display_fill, near_black, text_color
 
 ALL = 1 << 20          # bound used for whole-row / whole-column selections
 REF_COLORS = ["#1a73e8", "#d93025", "#9334e6", "#188038", "#e8710a", "#007b83", "#b06000"]

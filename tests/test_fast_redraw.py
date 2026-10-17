@@ -1,5 +1,5 @@
 """Moving the cursor without scrolling redraws only the selection layer, not every cell."""
-import theme
+from simplecore import theme
 
 
 class Wheel:

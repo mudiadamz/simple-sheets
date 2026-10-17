@@ -1,6 +1,5 @@
 """Light / dark mode switch."""
-import settings
-import theme
+from simplecore import settings, theme
 
 
 def canvas_rects(g, tag=None):

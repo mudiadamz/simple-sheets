@@ -2,9 +2,9 @@
 import time
 
 import openpyxl
+from simplecore import settings
 
 import cell_scripts
-import settings
 import sheet_props
 from conftest import open_in
 from test_menu import menu_states

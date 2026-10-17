@@ -2,7 +2,7 @@
 import os
 import time
 
-import crash
+from simplecore import crash
 
 
 def test_error_in_a_callback(app):

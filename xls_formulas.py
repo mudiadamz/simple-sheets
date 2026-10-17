@@ -255,7 +255,7 @@ class Book:
 
 def read(path):
     """[{(r, c): '=formula'}] per worksheet, in order (empty when the file can't be read this way)."""
-    from office_crypto import CompoundFile, NotEncrypted
+    from simplecore.office_crypto import CompoundFile, NotEncrypted
     try:
         with open(path, "rb") as f:
             cf = CompoundFile(f.read())

@@ -3,7 +3,7 @@ import re
 import tkinter as tk
 from tkinter import ttk
 
-from theme import C
+from simplecore.theme import C
 
 
 def matcher(query, match_case=False, whole=False):

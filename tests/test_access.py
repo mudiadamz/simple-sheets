@@ -2,12 +2,12 @@
 
 import tkinter as tk
 
+from simplecore import settings, theme
+
 import charts
 import keyboard_nav
 import palette
-import settings
 import settings_ui
-import theme
 
 
 def test_high_contrast(app):

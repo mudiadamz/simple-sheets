@@ -4,8 +4,7 @@ import json
 import sys
 
 import pytest
-
-import updates
+from simplecore import updates
 
 
 @pytest.fixture
@@ -108,7 +107,7 @@ def test_background_check(app, home):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows registry")
 def test_silent_install(tmp_path, monkeypatch):
-    import installer
+    from simplecore import installer
     fake = tmp_path / "payload.exe"
     fake.write_bytes(b"MZ app")
     monkeypatch.setattr(installer, "payload", lambda: str(fake))

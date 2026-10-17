@@ -1,8 +1,7 @@
 """Tests must never write the user's real settings (that once wiped a saved AI key on every test run)."""
 import os
 
-import recent
-import settings
+from simplecore import recent, settings
 
 
 def real_home():

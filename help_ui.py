@@ -1,10 +1,7 @@
-"""Help: keyboard shortcuts (F1), the user guide (assets/USER_GUIDE.md), About."""
-import os
-import sys
-import tkinter as tk
-from tkinter import ttk
-
-from version import APP_NAME, APP_VERSION
+"""Help: keyboard shortcuts (F1), the user guide (assets/USER_GUIDE.md), About. Simple Sheets' shortcut
+list; the window is simplecore.help_ui."""
+from simplecore import help_ui as _core
+from simplecore.help_ui import HelpWindow, guide_text, shortcuts_text, show  # noqa: F401
 
 SHORTCUTS = [
     ("Files", [("Ctrl+N", "New window"), ("Ctrl+O", "Open"), ("Ctrl+S", "Save"), ("Ctrl+Shift+S", "Save as"),
@@ -37,72 +34,5 @@ SHORTCUTS = [
                        ("Shift+F10 / Menu key", "Right-click menu"), ("Shift+F3", "Insert a function")]),
 ]
 
-
+_core.set_shortcuts(SHORTCUTS)
 GROUPS = {g for g, _ in SHORTCUTS}
-
-
-def resource(*parts):
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, *parts)
-
-
-def guide_text(name="USER_GUIDE.md"):
-    try:
-        with open(resource("assets", name), encoding="utf-8") as f:
-            return f.read()
-    except OSError:
-        return "The guide wasn't found."
-
-
-def shortcuts_text():
-    lines = []
-    for group, items in SHORTCUTS:
-        lines.append(group)
-        lines += [f"    {k:<38}{v}" for k, v in items]
-        lines.append("")
-    return "\n".join(lines)
-
-
-class HelpWindow(tk.Toplevel):
-    def __init__(self, app, title, text):
-        super().__init__(app)
-        from theme import C
-        self.title(title)
-        self.geometry(f"{int(640 * app.scale)}x{int(520 * app.scale)}")
-        box = tk.Text(self, wrap="word", padx=12, pady=10, relief="flat", font=("Consolas", 10),
-                      background=C["field_bg"], foreground=C["fg"])
-        sb = ttk.Scrollbar(self, command=box.yview)
-        box.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        box.pack(fill="both", expand=True)
-        box.tag_configure("h", font=("Segoe UI", 12, "bold"), spacing1=8)
-        box.tag_configure("code", background=C["header_bg"], foreground=C["fg"], lmargin1=16, lmargin2=16,
-                          wrap="none")                       # code lines stay whole (scroll sideways if needed)
-        in_code = False
-        for line in text.split("\n"):
-            if line.startswith("```"):             # fenced example: shaded, kept as typed
-                in_code = not in_code
-            elif in_code:
-                box.insert("end", line + "\n", "code")
-            elif line.startswith("#") or line in GROUPS:
-                box.insert("end", line.lstrip("# ") + "\n", "h")
-            else:
-                box.insert("end", line + "\n")
-        box.configure(state="disabled")
-        self.text = box
-        self.bind("<Escape>", lambda e: self.destroy())
-
-
-def show(app, what):
-    if what == "shortcuts":
-        return HelpWindow(app, "Keyboard shortcuts", shortcuts_text())
-    if what == "guide":
-        return HelpWindow(app, "User guide", guide_text())
-    if what == "scripts":
-        w = HelpWindow(app, "Script guide", guide_text("SCRIPT_GUIDE.md"))
-        w.geometry(f"{int(820 * app.scale)}x{int(640 * app.scale)}")
-        return w
-    from tkinter import messagebox
-    messagebox.showinfo("About", f"{APP_NAME} {APP_VERSION}\n\nA light viewer / editor for spreadsheet files "
-                        "(.xlsx, .xlsm, .xlsb, .xls, .ods, .csv).", parent=app)
-    return None

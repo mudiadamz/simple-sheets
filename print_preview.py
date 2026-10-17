@@ -4,8 +4,9 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 from tkinter import font as tkfont
 
+from simplecore.theme import C
+
 import pdf_export
-from theme import C
 
 WHAT = ["This sheet", "All sheets", "Selection"]
 ORIENTATIONS = {"Automatic": None, "Portrait": "portrait", "Landscape": "landscape"}
@@ -15,7 +16,7 @@ FITS = {"Automatic": None, "Actual size": "actual", "Fit all columns on one page
 
 def print_options():
     """The orientation / scaling chosen last time in the print dialog: {"orientation", "fit"}."""
-    import settings
+    from simplecore import settings
     return {"orientation": settings.get("print_orientation"), "fit": settings.get("print_fit")}
 
 
@@ -164,7 +165,7 @@ class Preview(tk.Toplevel):
         return {"orientation": ORIENTATIONS[self.orientation.get()], "fit": FITS[self.fit.get()]}
 
     def options_changed(self):
-        import settings
+        from simplecore import settings
         o = self.options()
         settings.set("print_orientation", o["orientation"])       # remembered for the next time
         settings.set("print_fit", o["fit"])
