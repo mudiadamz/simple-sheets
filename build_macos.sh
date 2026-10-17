@@ -14,7 +14,7 @@ Image.open("assets/simple_sheets.ico").save("/tmp/simple_sheets.icns")
 EOF
 
 python3 -m PyInstaller --noconfirm --windowed --name "Simple Sheets" \
-  --icon /tmp/simple_sheets.icns --add-data "assets:assets" \
+  --icon /tmp/simple_sheets.icns --add-data "$PWD/assets:assets" \
   --osx-bundle-identifier net.simplesheets.app \
   --exclude-module pandas --exclude-module numpy --exclude-module PIL \
   --workpath /tmp/ss-build --specpath /tmp/ss-build simple_sheets.py

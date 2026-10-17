@@ -200,3 +200,93 @@ def test_editor_and_menus_follow_theme(app):
     m = build_menu(app)
     assert str(m.cget("background")) == theme.DARK["menu_bg"]
     app.set_theme(False)
+
+
+def test_sheet_tabs_have_no_empty_page_above_them(app):
+    """The tab strip is only tabs: macOS light (aqua) drew its 18/8/18/17 padding and an empty sunken page
+    as a grey band between the sheet and the tabs."""
+    nb = app.tabs.nb
+    for dark in (False, True, False):
+        theme.apply(app, dark)
+        app.update()
+        tab_ys = [y for y in range(nb.winfo_height()) if nb.identify(20, y)]   # rows where a tab is
+        assert tab_ys and tab_ys[0] <= 6, (dark, tab_ys[:1], nb.winfo_height())
+        assert nb.winfo_height() - (tab_ys[-1] - tab_ys[0] + 1) <= 8, (dark, nb.winfo_height())
+
+
+def test_follows_the_system_until_the_user_chooses(app, monkeypatch):
+    """No choice made: light / dark is the system's, also when it changes. Dark mode clicked: that choice
+    stays, whatever the system does. Match system light / dark: following again."""
+    assert app.follow_var.get() and settings.get("dark") is None
+    monkeypatch.setenv("SIMPLECORE_SYSTEM_THEME", "dark")
+    app.follow_system_theme()                                   # back in front: the system went dark
+    assert theme.C["dark"] and app.dark_var.get() and settings.get("dark") is None
+    monkeypatch.setenv("SIMPLECORE_SYSTEM_THEME", "light")
+    app.follow_system_theme()
+    assert not theme.C["dark"]
+    app.dark_var.set(True)                                      # the user's own choice
+    app.toggle_dark()
+    assert settings.get("dark") is True and not app.follow_var.get()
+    app.follow_system_theme()                                   # system light: the choice stays
+    assert theme.C["dark"]
+    app.follow_var.set(True)                                    # View > Match system light / dark
+    app.toggle_follow_system()
+    assert settings.get("dark") is None and not theme.C["dark"] and not app.dark_var.get()
+    monkeypatch.setenv("SIMPLECORE_SYSTEM_THEME", "dark")
+    app.event_generate("<Activate>")                            # the hook that runs it
+    app.update()
+    assert theme.C["dark"]
+
+
+def test_new_window_follows_the_system(monkeypatch, tmp_path):
+    from conftest import make_app
+    monkeypatch.setenv("SIMPLE_SHEETS_HOME", str(tmp_path))
+    monkeypatch.setenv("SIMPLECORE_SYSTEM_THEME", "dark")
+    a = make_app()
+    try:
+        assert a.follow_var.get() and a.dark_var.get() and theme.C["dark"]
+    finally:
+        a.destroy()
+    settings.set("dark", False)                                 # an own choice beats the system
+    a = make_app()
+    try:
+        assert not a.follow_var.get() and not a.dark_var.get()
+    finally:
+        a.destroy()
+        theme.C.clear()
+        theme.C.update(theme.LIGHT)
+
+
+def test_system_dark_reads_the_os(monkeypatch):
+    monkeypatch.delenv("SIMPLECORE_SYSTEM_THEME")
+    assert theme.system_dark("linux") is None
+
+    class Done:
+        def __init__(self, out):
+            self.stdout = out
+    monkeypatch.setattr(theme.subprocess, "run", lambda *a, **k: Done("Dark\n"))
+    assert theme.system_dark("darwin") is True
+    monkeypatch.setattr(theme.subprocess, "run", lambda *a, **k: Done(""))   # light: the key is missing
+    assert theme.system_dark("darwin") is False
+
+    def broken(*a, **k):
+        raise OSError("no defaults")
+    monkeypatch.setattr(theme.subprocess, "run", broken)
+    assert theme.system_dark("darwin") is None
+
+
+def test_mac_native_widgets_match(app):
+    """macOS: native buttons / title bar "auto" while following the system, else the chosen light / dark."""
+    import sys
+
+    import pytest
+    if sys.platform != "darwin":
+        pytest.skip("macOS only")
+    app.set_theme(False)
+    assert app.wm_attributes("-appearance") == "auto"
+    app.dark_var.set(True)
+    app.toggle_dark()
+    assert app.wm_attributes("-appearance") in ("dark", "darkaqua")
+    app.dark_var.set(False)
+    app.toggle_dark()
+    assert app.wm_attributes("-appearance") in ("light", "aqua")

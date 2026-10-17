@@ -59,6 +59,8 @@ def build(app, parent):
                          command=lambda: __import__("print_preview").toggle(app, app.page_breaks_var.get()))
     view.add_separator()
     view.add_checkbutton(label="Dark mode", variable=app.dark_var, command=app.toggle_dark)
+    view.add_checkbutton(label="Match system light / dark", variable=app.follow_var,
+                         command=app.toggle_follow_system)
     view.add_checkbutton(label="High contrast", variable=app.contrast_var, command=app.toggle_contrast)
     menu.add_cascade(label="View", menu=view)
     insert = tk.Menu(menu, tearoff=False)

@@ -92,6 +92,7 @@ class Grid(ttk.Frame):
         import platform_ui  # Linux: the wheel comes as buttons 4 / 5
         platform_ui.bind_wheel(cv, self.on_wheel, lambda e: self.on_wheel(e, horizontal=True),
                                lambda e: self.app.zoom_step(1 if e.delta > 0 else -1))
+        platform_ui.bind_touchpad(cv, self.on_touchpad)   # macOS two-finger scroll (Tk 9)
         for key, d in {"Up": (-1, 0), "Down": (1, 0), "Left": (0, -1), "Right": (0, 1)}.items():
             cv.bind(f"<{key}>", lambda e, d=d: self.move(*d))
             cv.bind(f"<Shift-{key}>", lambda e, d=d: self.move(*d, extend=True))
@@ -112,7 +113,7 @@ class Grid(ttk.Frame):
         cv.bind("<Alt-Down>", lambda e: self.open_dropdown())
         cv.bind("<Escape>", lambda e: (self.app.cancel_painter(), self.unpick()))
         cv.bind("<Delete>", lambda e: self.clear())
-        cv.bind("<BackSpace>", lambda e: self.edit(""))
+        cv.bind("<BackSpace>", lambda e: self.backspace())
         cv.bind("<Control-a>", lambda e: self.smart_select_all())
         cv.bind("<Control-c>", lambda e: self.copy())
         cv.bind("<Control-x>", lambda e: self.cut())
@@ -1435,9 +1436,11 @@ class Grid(ttk.Frame):
         if not self.typing_formula():          # typing "=…": scroll to point at cells further away
             self.commit()
         # a notch (delta 120) = 3 rows; touchpads send small deltas, which add up instead of jumping 3 rows each
-        rows = -e.delta if sys.platform == "darwin" else -e.delta * 3 / 120
+        import platform_ui
+        old_mac = platform_ui.old_mac_wheel()                              # Tk 8.6 on macOS: delta 1, 2, 3…
+        rows = -e.delta if old_mac else -e.delta * 3 / 120
         acc = rows / 3 if horizontal else rows
-        if abs(e.delta) >= 120 or sys.platform == "darwin":                # a notch: always moves, whole rows
+        if abs(e.delta) >= 120 or old_mac:                                 # a notch: always moves, whole rows
             acc = round(acc) or (1 if acc > 0 else -1)
         else:
             acc += getattr(self, "_wheel_acc", 0.0)
@@ -1451,6 +1454,26 @@ class Grid(ttk.Frame):
             self.top += step
         self.clamp_scroll()
         self.redraw_soon()
+        return "break"
+
+    def on_touchpad(self, e):
+        """macOS two-finger scroll (Tk 9 <TouchpadScroll>): pixel deltas both ways, added up into rows / columns."""
+        import platform_ui
+        dx, dy = platform_ui.touchpad_deltas(int(e.delta))
+        if not (dx or dy):
+            return "break"
+        if not self.typing_formula():
+            self.commit()
+        ax, ay = getattr(self, "_pad_acc", (0.0, 0.0))
+        ax -= dx / max(self.colw(self.left) or self.px(64), 1)
+        ay -= dy / max(self.rowh, 1)
+        cols, rows = int(ax), int(ay)
+        self._pad_acc = (ax - cols, ay - rows)
+        if cols or rows:
+            self.left += cols
+            self.top += rows
+            self.clamp_scroll()
+            self.redraw_soon()
         return "break"
 
     def redraw_soon(self):
@@ -1468,8 +1491,18 @@ class Grid(ttk.Frame):
 
     def on_key(self, e):
         ctrl_only = e.state & 0x4 and not e.state & 0x20000   # Ctrl but not AltGr
-        if self.sheet and e.char and e.char.isprintable() and not ctrl_only:
+        command = sys.platform == "darwin" and e.state & 0x8   # ⌘ + a key with no shortcut: don't type it
+        if self.sheet and e.char and e.char.isprintable() and not ctrl_only and not command:
             return self.edit(e.char)
+
+    def backspace(self, platform=None):
+        """Backspace clears the active cell and starts editing. A Mac has no separate Delete key (its "delete"
+        is Backspace): there a selected range, chart or picture is cleared / removed like Delete does."""
+        if (platform or sys.platform) == "darwin" and (
+                self.multi() or getattr(self, "selected_image", None) is not None
+                or getattr(self, "selected_chart", None) is not None):
+            return self.clear()
+        return self.edit("")
 
     def clear(self):
         im = getattr(self, "selected_image", None)

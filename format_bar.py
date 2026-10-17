@@ -224,6 +224,101 @@ class FormatBar(ttk.Frame):
         self.styles_menu = m
         self.colors = {"fg": "#000000", "bg": "#ffff00"}   # last used, applied by the icon click
         self.draw_color_icons()
+        self.setup_flow()
+
+    # ---------- layout ----------
+
+    def setup_flow(self):
+        """Lay the buttons out in rows: on a narrow window (MacBook Air, half a screen) the groups between
+        separators that don't fit go behind a » button, which shows them as more rows (and hides them again)."""
+        from simplecore import settings
+        self.groups, group = [], []
+        for w in self.pack_slaves():
+            info = w.pack_info()
+            pad = info.get("padx", 0)
+            pad = tuple(int(p) for p in pad) if isinstance(pad, (tuple, list)) else (int(pad), int(pad))
+            if isinstance(w, ttk.Separator):
+                self.groups.append(group)
+                group = []
+            else:
+                group.append((w, pad if len(pad) == 2 else (pad[0], pad[0])))
+            w.pack_forget()
+        self.groups.append(group)
+        self.seps = [w for w in self.winfo_children() if isinstance(w, ttk.Separator)]
+        self.expanded = bool(settings.get("toolbar_expanded", False))
+        self.more_btn = ttk.Button(self, text="»", style="Toolbutton", width=2, command=self.toggle_more)
+        self.more_tip = Tooltip(self.more_btn, "More tools")
+        self.flow_rows, self.hidden_groups = 1, 0
+        self._flow_key = None
+        # one row high from the start, nothing placed until the real width is known: no jump at the first open
+        self.configure(height=self.row_height() + 4, width=1)
+        self.bind("<Configure>", lambda e: self.flow(), add="+")
+        for g in self.groups:                              # a button got wider (language, icons): lay out again
+            for w, _ in g:
+                w.bind("<Configure>", lambda e: self.after_idle(self.flow), add="+")
+
+    def row_height(self):
+        return max((w.winfo_reqheight() for g in self.groups for w, _ in g), default=1)
+
+    def toggle_more(self):
+        from simplecore import settings
+        self.expanded = not self.expanded
+        settings.set("toolbar_expanded", self.expanded)
+        self.flow()
+
+    def flow(self, width=None):
+        """Place the groups left to right. When they don't all fit on one row, a » button at its right end
+        shows the rest as more rows (expanded) or keeps them hidden (one row: more room for the sheet)."""
+        width = width or self.winfo_width()
+        if width <= 1:                                     # not mapped yet: wait for the real width
+            return
+        sep_w = 14                                         # padx 6 + line + 6, as the packed separators had
+        row_h = self.row_height()
+        widths = [sum(w.winfo_reqwidth() + p[0] + p[1] for w, p in g) for g in self.groups]
+        key = (width, row_h, tuple(widths), self.expanded)
+        if key == self._flow_key:
+            return
+        self._flow_key = key
+        pad_l, pad_b = 4, 4                                # the frame's padding (4, 0, 4, 4)
+        gap = self.px(2)
+        more_w = self.more_btn.winfo_reqwidth() + 6
+        fits = sum(widths) + sep_w * (len(widths) - 1) <= width - 2 * pad_l
+        x, row = pad_l, 0
+        spots = []                                         # (group index, x, row)
+        for i, gw in enumerate(widths):
+            room = width - pad_l - (0 if fits or row else more_w)   # the first row keeps room for »
+            if spots and x + sep_w + gw > room:            # doesn't fit: next row
+                x, row = pad_l, row + 1
+            elif spots:
+                x += sep_w
+            spots.append((i, x, row))
+            x += gw
+        shown = spots if self.expanded or fits else [s for s in spots if s[2] == 0]
+        self.hidden_groups = len(spots) - len(shown)
+        for sep in self.seps:
+            sep.place_forget()
+        for n, (i, x, row) in enumerate(spots):
+            if n >= len(shown):
+                for w, _ in self.groups[i]:
+                    w.place_forget()
+                continue
+            y = row * (row_h + gap)
+            if n and spots[n - 1][2] == row and n - 1 < len(self.seps):   # separator before it on the same row
+                self.seps[n - 1].place(x=x - sep_w + 6, y=y, width=2, height=row_h)
+            for w, (pl, pr) in self.groups[i]:
+                x += pl
+                w.place(x=x, y=y + (row_h - w.winfo_reqheight()) // 2)
+                x += w.winfo_reqwidth() + pr
+        if fits:
+            self.more_btn.place_forget()
+        else:
+            self.more_btn.configure(text="«" if self.expanded else "»")
+            self.more_tip.text = "Fewer tools" if self.expanded else "More tools"
+            self.more_btn.place(x=width - pad_l - self.more_btn.winfo_reqwidth(),
+                                y=(row_h - self.more_btn.winfo_reqheight()) // 2)
+        self.flow_rows = (shown[-1][2] + 1) if shown else 1
+        total = self.flow_rows * row_h + (self.flow_rows - 1) * gap + pad_b
+        self.configure(height=total, width=1)              # takes the width it's given, asks for none
 
     # ---------- widgets ----------
 

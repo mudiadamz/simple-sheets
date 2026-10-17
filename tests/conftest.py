@@ -16,6 +16,8 @@ SAFE_HOME = tempfile.mkdtemp(prefix="ss-test-home-")
 os.environ["SIMPLE_SHEETS_HOME"] = SAFE_HOME
 import version  # noqa: E402,F401  (tells simplecore who the app is before any test imports it)
 
+os.environ["SIMPLECORE_SYSTEM_THEME"] = "light"   # the app follows the system's light / dark: same on every machine
+
 
 @pytest.fixture(autouse=True)
 def _never_real_settings(monkeypatch, tmp_path):
@@ -121,6 +123,7 @@ def _reset(a):
     a.painter = None
     a.formula_home = None
     g.drag = g.fill_preview = g.point = None
+    g._wheel_acc, g._pad_acc = 0.0, (0.0, 0.0)   # half-rows of scrolling left over from the previous test
     g.extra, g.ref_marks = [], []
     a.books, a.book_index = [None], 0
     a.book_bar.rebuild()
@@ -132,6 +135,7 @@ def _reset(a):
     a._error_dialog_open = False
     for k in ("unlocked_files", "unlocked_password"):
         a.__dict__.pop(k, None)
+    a.follow_var.set(True)
     if a.dark_var.get() or theme.C["dark"] or a.contrast_var.get():
         a.contrast_var.set(False)
         a.set_theme(False)

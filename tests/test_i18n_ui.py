@@ -68,7 +68,8 @@ def test_tooltip_translated(app, indonesian):
     t = Tooltip(b, "Menu")
     t.text = "Undo (Ctrl+Z)"
     t.show()
-    assert t.tip.winfo_children()[0]["text"] == "Batalkan (Ctrl+Z)"
+    import platform_ui  # macOS shows the shortcut as ⌘Z
+    assert t.tip.winfo_children()[0]["text"] == platform_ui.mac_keys("Batalkan (Ctrl+Z)")
     t.hide()
     b.destroy()
 

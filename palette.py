@@ -4,6 +4,8 @@ from tkinter import ttk
 
 from simplecore import settings
 
+import platform_ui
+
 
 def commands(menu, path=()):
     """Walk a tk.Menu: [(label path, menu, index)] for each command / check item (submenus included)."""
@@ -144,7 +146,7 @@ class Tips(tk.Toplevel):
     def go(self, step):
         self.i = (self.i + step) % len(TIPS)
         self.head["text"] = f"Tip {self.i + 1} of {len(TIPS)}"
-        self.text["text"] = TIPS[self.i]
+        self.text["text"] = platform_ui.mac_keys(TIPS[self.i])
 
     def close(self):
         settings.set("tip_next", (self.i + 1) % len(TIPS))

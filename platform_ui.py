@@ -4,6 +4,10 @@ import os
 import subprocess
 import sys
 
+# macOS: ⌘ twins, ⌘ / ⇧ / ⌥ labels, Tk 9 touchpad scroll (shared with the other apps)
+from simplecore.macos import bind_touchpad, command_twin, mac_keys, old_mac_wheel, touchpad_deltas  # noqa: F401
+from simplecore.macos import install as install_mac  # noqa: F401
+
 
 def open_path(path):
     """Open a file with its program. True if something was started."""
