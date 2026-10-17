@@ -59,3 +59,92 @@ def test_print_and_open_fallbacks(monkeypatch):
     assert calls == [["lp", "/tmp/x.pdf"], ["xdg-open", "/tmp/x.pdf"]]
     monkeypatch.setattr(platform_ui.sys, "platform", "darwin")
     assert platform_ui.open_path("/tmp/x.pdf") and calls[-1] == ["open", "/tmp/x.pdf"]
+
+
+def test_touchpad_deltas_unpacked():
+    pack = lambda dx, dy: (dx << 16) | (dy & 0xFFFF)   # noqa: E731  how Tk 9 builds %D
+    assert platform_ui.touchpad_deltas(pack(0, -7)) == (0, -7)
+    assert platform_ui.touchpad_deltas(pack(-3, 12)) == (-3, 12)
+    assert platform_ui.touchpad_deltas(pack(40, 0)) == (40, 0)
+
+
+def test_old_mac_wheel_only_on_tk86():
+    assert platform_ui.old_mac_wheel("darwin", 8.6)
+    assert not platform_ui.old_mac_wheel("darwin", 9.0)
+    assert not platform_ui.old_mac_wheel("win32", 8.6)
+
+
+class Pad:
+    def __init__(self, dx, dy):
+        self.delta = (dx << 16) | (dy & 0xFFFF)
+
+
+def test_grid_two_finger_scroll(app):
+    g = app.table
+    app.set_cells([(r, c, "x") for r in range(200) for c in range(3)])
+    app.update()
+    step = g.rowh
+    for _ in range(4):                                  # small pixel moves add up to whole rows
+        g.on_touchpad(Pad(0, -step // 2))
+    assert g.top == 2 and g.left == 0
+    g.on_touchpad(Pad(0, step * 2))                     # fingers the other way: back up
+    assert g.top == 0
+    g.on_touchpad(Pad(-g.colw(0), 0))                   # sideways: one column
+    assert g.left == 1 and g.top == 0
+    g.on_touchpad(Pad(0, 0))
+    assert g.left == 1
+
+
+def test_touchpad_bound_when_tk_has_it(app):
+    g = app.table
+    try:
+        app.tk.call("bind", "all", "<TouchpadScroll>")
+        has_event = True
+    except tk.TclError:
+        has_event = False
+    assert bool(g.cv.bind("<TouchpadScroll>")) == has_event
+
+
+def test_mac_shortcut_labels():
+    assert platform_ui.mac_keys("Save (Ctrl+S)", "darwin") == "Save (⌘S)"
+    assert platform_ui.mac_keys("Ctrl+Shift+S", "darwin") == "⇧⌘S"
+    assert platform_ui.mac_keys("Alt+Shift+→", "darwin") == "⌥⇧→"
+    assert platform_ui.mac_keys("Ctrl+Alt+5", "darwin") == "⌥⌘5"
+    assert platform_ui.mac_keys("F9", "darwin") == "F9"
+    assert platform_ui.mac_keys("Ctrl+S", "win32") == "Ctrl+S"
+
+
+def test_command_twin():
+    assert platform_ui.command_twin("<Control-s>") == "<Command-s>"
+    assert platform_ui.command_twin("<Control-Shift-A>") == "<Command-Shift-A>"
+    assert platform_ui.command_twin("<Control-Button-1>") == "<Command-Button-1>"
+    assert platform_ui.command_twin("<Control-MouseWheel>") is None
+    assert platform_ui.command_twin("<Key>") is None
+    assert platform_ui.install_mac("win32") is False
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Command modifier exists only in Tk on macOS")
+def test_mac_command_does_what_ctrl_does(app):
+    g = app.table
+    assert g.cv.bind("<Command-c>") and g.cv.bind("<Command-z>") or app.bind("<Command-z>")
+    w = tk.Frame(app)
+    got = []
+    w.bind("<Control-k>", lambda e: got.append("k"))  # bound after the start: gets its twin too
+    assert w.bind("<Command-k>")
+    m = tk.Menu(app, tearoff=False)
+    m.add_command(label="Save", accelerator="Ctrl+S")
+    m.insert_command(0, label="Save as…", accelerator="Ctrl+Shift+S")
+    assert m.entrycget(1, "accelerator") == "⌘S" and m.entrycget(0, "accelerator") == "⇧⌘S"
+    w.destroy()
+    m.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_unbound_command_key_does_not_type(app):
+    g = app.table
+    g.goto(0, 0)
+
+    class E:
+        char, state = "l", 0x8                       # ⌘L: no shortcut
+    g.on_key(E())
+    assert g.editor is None and g.text(0, 0) == ""

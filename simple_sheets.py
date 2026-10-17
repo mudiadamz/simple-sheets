@@ -81,6 +81,8 @@ def resource(*parts):
 
 class App(tk.Tk):
     def __init__(self):
+        import platform_ui  # macOS: ⌘ works wherever Ctrl does, menus show ⌘ (before any widget binds keys)
+        platform_ui.install_mac()
         super().__init__()
         import settings_ui
         settings_ui.apply_startup()
@@ -107,7 +109,10 @@ class App(tk.Tk):
         self.names, self.disk_names = {}, {}   # defined names {name: "Sheet1!$A$1:$B$5"}, and as on disk
 
         theme.base_styles(ttk.Style(self), self.scale)
-        self.dark_var = tk.BooleanVar(self, value=bool(settings.get("dark", False)))
+        # light / dark: the system's, until the user picks one (View > Dark mode); "dark" missing = follow
+        chosen = settings.get("dark")
+        self.follow_var = tk.BooleanVar(self, value=chosen is None)
+        self.dark_var = tk.BooleanVar(self, value=bool(theme.system_dark()) if chosen is None else bool(chosen))
         self.contrast_var = tk.BooleanVar(self, value=bool(settings.get("contrast", False)))
         self.grid_var = tk.BooleanVar(self, value=True)        # View menu check marks
         self.headings_var = tk.BooleanVar(self, value=True)
@@ -224,6 +229,11 @@ class App(tk.Tk):
         self.recovery_id, self.autosaved, self.recovered = recovery.new_id(), None, False
         self.after(recovery.INTERVAL_MS, self.autosave_tick)
         self.bind("<Activate>", lambda e: self.after_idle(self.check_disk), add="+")   # back from another app
+        self.bind("<Activate>", lambda e: self.after_idle(self.follow_system_theme), add="+")
+        try:   # Tk 9 on macOS: the system switched light / dark while the app is in front
+            self.bind("<<AppearanceChanged>>", lambda e: self.after_idle(self.follow_system_theme), add="+")
+        except tk.TclError:
+            pass
         self.new_document()
         self.set_theme(self.dark_var.get())
         import i18n  # other languages: dialogs and messages too, not only menus
@@ -232,9 +242,6 @@ class App(tk.Tk):
         keyboard_nav.install(self)
         self.bind("<Control-P>", lambda e: (__import__("palette").open_palette(self), "break")[-1])  # Ctrl+Shift+P
         self.bind("<Control-Shift-A>", lambda e: (__import__("ai_assist").open_assistant(self), "break")[-1])
-        import platform_ui  # macOS: ⌘ works wherever Ctrl does
-        platform_ui.mirror_command_keys(self)
-        platform_ui.mirror_command_keys(self.table.cv)
 
     def toggle_formula_bar(self):
         on = self.value.set_expanded(not self.value.expanded)
@@ -259,8 +266,27 @@ class App(tk.Tk):
         crash.report(self, exc_type, exc, tb)
 
     def toggle_dark(self):
-        self.set_theme(self.dark_var.get())
+        """The user's own choice: kept from now on, whatever the system's light / dark is."""
+        self.follow_var.set(False)
         settings.set("dark", self.dark_var.get())
+        self.set_theme(self.dark_var.get())
+
+    def toggle_follow_system(self):
+        """View > Match system light / dark: forget the own choice (on) / keep the current look as it (off)."""
+        if self.follow_var.get():
+            settings.set("dark", None)
+            self.set_theme(bool(theme.system_dark()))
+        else:
+            settings.set("dark", self.dark_var.get())
+            self.set_theme(self.dark_var.get())
+
+    def follow_system_theme(self):
+        """Back in front / the system switched: take the system's light / dark when following it."""
+        if not self.winfo_exists() or not self.follow_var.get():
+            return
+        dark = theme.system_dark()
+        if dark is not None and dark != self.dark_var.get():
+            self.set_theme(dark)
 
     def toggle_contrast(self):
         self.set_theme(self.dark_var.get())
@@ -269,7 +295,7 @@ class App(tk.Tk):
     def set_theme(self, dark):
         """Light / dark (or high contrast) for the whole window."""
         self.dark_var.set(dark)
-        theme.apply(self, dark, self.contrast_var.get())
+        theme.apply(self, dark, self.contrast_var.get(), follow=self.follow_var.get())
         self.fmtbar.refresh_icons()
         self.__dict__.pop("menu_icons", None)   # right-click menu icons get redrawn in the new ink
         pane = getattr(self, "ai_pane", None)

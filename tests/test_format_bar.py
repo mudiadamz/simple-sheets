@@ -129,3 +129,49 @@ def test_bigger_smaller_text_buttons(app):
     assert g.style(1, 0)["size"] == 8
     texts = [w["text"] for w in fb.winfo_children() if w.winfo_class() == "TButton"]
     assert "A▴" in texts and "A▾" in texts
+
+
+
+def test_toolbar_more_button_on_a_narrow_window(app):
+    """A MacBook Air / half-screen window: one row, the groups that don't fit behind ». » shows them as more
+    rows, « hides them again; the choice is remembered."""
+    import settings
+    bar = app.fmtbar
+    app.update()
+    need = sum(sum(w.winfo_reqwidth() + p[0] + p[1] for w, p in g) for g in bar.groups) + 14 * (len(bar.groups) - 1)
+    bar.expanded = False
+    bar.flow(need + 20)
+    assert bar.flow_rows == 1 and bar.hidden_groups == 0 and not bar.more_btn.place_info()
+    one_row = bar.cget("height")
+    narrow = need // 2
+    bar.flow(narrow)                                      # collapsed: still one row, the rest hidden
+    assert bar.flow_rows == 1 and bar.hidden_groups > 0 and bar.cget("height") == one_row
+    assert bar.more_btn.place_info() and bar.more_btn["text"] == "»"
+    shown = [g for g in bar.groups if g[0][0].place_info()]
+    assert len(shown) == len(bar.groups) - bar.hidden_groups
+    more_x = int(bar.more_btn.place_info()["x"])
+    for g in shown:                                       # nothing under the » button
+        for w, _ in g:
+            assert int(w.place_info()["x"]) + w.winfo_reqwidth() <= more_x
+    bar.configure(width=narrow)
+    bar.toggle_more()                                     # »: every group shown, on more rows
+    bar.flow(narrow)
+    assert settings.get("toolbar_expanded") is True
+    assert bar.flow_rows >= 2 and bar.hidden_groups == 0 and bar.cget("height") > one_row
+    assert bar.more_btn["text"] == "«"
+    for g in bar.groups:                                  # a group is never split over two rows
+        ys = {int(w.place_info()["y"]) + w.winfo_reqheight() // 2 for w, _ in g}
+        assert max(ys) - min(ys) <= 2, g
+    placed = [s for s in bar.seps if s.place_info()]
+    assert len(placed) == len(bar.groups) - bar.flow_rows  # no separator dangling at a row's end
+    bar.toggle_more()
+    bar.flow(narrow)
+    assert bar.flow_rows == 1 and settings.get("toolbar_expanded") is False
+
+
+def test_toolbar_waits_for_its_width(app):
+    """Nothing is laid out before the window has a size (no one-row-then-wrapped flash at the first open)."""
+    bar = app.fmtbar
+    bar._flow_key = None
+    bar.flow(1)
+    assert bar._flow_key is None

@@ -1,4 +1,6 @@
 """Selection, editing, clipboard, undo/redo, zoom and saving through the real window."""
+import sys
+
 import openpyxl
 
 import workbooks
@@ -175,3 +177,28 @@ def test_zoom(app, tmp_path):
     assert app.zoom_label["text"] == "300%"
     key(app, "<Control-0>")
     assert app.zoom_label["text"] == "100%" and g.colw(0) == w0 and g.editor is None
+
+
+def test_mac_backspace_clears_a_selected_range(app, monkeypatch):
+    """A Mac keyboard has only "delete" (= Backspace): on a range it clears every cell, like Delete."""
+    g = app.table
+    app.set_cells([(r, c, "v") for r in range(3) for c in range(2)])
+    monkeypatch.setattr(sys, "platform", "darwin")
+    g.select(0, 0, 2, 1)
+    key(app, "<BackSpace>")
+    assert all(g.text(r, c) == "" for r in range(3) for c in range(2)) and g.editor is None
+    app.undo()
+    assert g.text(2, 1) == "v"
+    g.goto(1, 1)                                         # one cell: clear it and start typing, as before
+    key(app, "<BackSpace>")
+    assert g.editor is not None and g.editor.get() == ""
+    g.commit(cancel=True)
+
+
+def test_windows_backspace_on_range_edits_active_cell(app):
+    g = app.table
+    app.set_cells([(r, 0, "v") for r in range(3)])
+    g.select(0, 0, 2, 0)
+    assert g.backspace(platform="win32") == "break" and g.editor is not None
+    g.commit(cancel=True)
+    assert g.text(1, 0) == "v" and g.text(2, 0) == "v"

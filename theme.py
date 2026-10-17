@@ -1,6 +1,8 @@
 """Light / dark colours for the whole app. `C` always holds the active palette."""
 import colorsys
 import functools
+import os
+import subprocess
 import sys
 import tkinter as tk
 from tkinter import ttk
@@ -110,6 +112,9 @@ def near_black(hex_color):
 def base_styles(style, scale):
     """App-specific ttk styles; re-applied after every theme switch (they are per-theme)."""
     style.configure("Bottom.TNotebook", tabposition="sw")
+    if style.theme_use() == "aqua":   # macOS light: no padding (18 8 18 17) / empty sunken page above the tabs
+        style.configure("Bottom.TNotebook", padding=0, tabmargins=0)
+        style.layout("Bottom.TNotebook", [])
     style.configure("Bottom.TNotebook.Tab", padding=(int(14 * scale), int(3 * scale)))
     style.configure("Icon.Toolbutton", font=("Segoe UI Symbol", 12))
     for name, font in (("B", ("Segoe UI", 10, "bold")), ("I", ("Segoe UI", 10, "italic")),
@@ -118,9 +123,51 @@ def base_styles(style, scale):
         style.configure(f"{name}.Toolbutton", font=font)
 
 
-def apply(app, dark, contrast=False):
-    """Switch the whole window between light, dark and high contrast."""
-    global LIGHT_THEME
+FOLLOW = False   # the app follows the system's light / dark (no choice of its own): macOS widgets "auto"
+
+
+def system_dark(platform=None):
+    """The system's light / dark setting: True (dark), False (light), None (unknown: Linux, an error).
+    SIMPLE_SHEETS_SYSTEM_THEME=light / dark overrides it (tests)."""
+    forced = os.environ.get("SIMPLE_SHEETS_SYSTEM_THEME", "").lower()
+    if forced in ("light", "dark"):
+        return forced == "dark"
+    platform = platform or sys.platform
+    if platform == "darwin":   # "Dark" when dark; the key is missing when light
+        try:
+            out = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True,
+                                 text=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout.strip().lower() == "dark"
+    if platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+                return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+        except (OSError, ImportError):
+            return None
+    return None
+
+
+def _mac_appearance(win, dark):
+    """macOS: native widgets / title bar in the app's light or dark ("auto" while following the system)."""
+    if sys.platform != "darwin":
+        return
+    names = [("auto", "auto")] if FOLLOW else [("dark", "light"), ("darkaqua", "aqua")]   # Tk 9 / Tk 8.6 names
+    for dark_name, light_name in names:
+        try:
+            win.wm_attributes("-appearance", dark_name if dark else light_name)
+            return
+        except tk.TclError:   # the other Tk's names, or an old Tk without -appearance
+            pass
+
+
+def apply(app, dark, contrast=False, follow=False):
+    """Switch the whole window between light, dark and high contrast. follow: the choice is the system's."""
+    global LIGHT_THEME, FOLLOW
+    FOLLOW = follow and not contrast
     C.clear()
     C.update(HIGH if contrast else DARK if dark else LIGHT)
     dark = C["dark"]
@@ -150,9 +197,11 @@ def apply(app, dark, contrast=False):
     app.configure(background=C["bg"])
     _recolor(app)
     _title_bar(app, dark)
+    _mac_appearance(app, dark)
     for w in _descendants(app):                  # dialogs already open: their title bars too
         if w.winfo_class() == "Toplevel" and w.winfo_ismapped():
             _title_bar(w, dark)
+            _mac_appearance(w, dark)
     install(app)
 
 
@@ -212,6 +261,7 @@ def install(app):
         w = e.widget
         if not isinstance(w, (tk.Tk, tk.Toplevel)):
             return
+        _mac_appearance(w, C["dark"])
         if C["dark"] or getattr(w, "_dark_title", False):
             _recolor(w)
             _title_bar(w, C["dark"], force=True)

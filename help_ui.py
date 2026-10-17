@@ -4,6 +4,7 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 
+import platform_ui
 from version import APP_NAME, APP_VERSION
 
 SHORTCUTS = [
@@ -58,7 +59,7 @@ def shortcuts_text():
     lines = []
     for group, items in SHORTCUTS:
         lines.append(group)
-        lines += [f"    {k:<38}{v}" for k, v in items]
+        lines += [f"    {platform_ui.mac_keys(k):<38}{v}" for k, v in items]
         lines.append("")
     return "\n".join(lines)
 

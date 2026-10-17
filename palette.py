@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk
 
+import platform_ui
 import settings
 
 
@@ -144,7 +145,7 @@ class Tips(tk.Toplevel):
     def go(self, step):
         self.i = (self.i + step) % len(TIPS)
         self.head["text"] = f"Tip {self.i + 1} of {len(TIPS)}"
-        self.text["text"] = TIPS[self.i]
+        self.text["text"] = platform_ui.mac_keys(TIPS[self.i])
 
     def close(self):
         settings.set("tip_next", (self.i + 1) % len(TIPS))
