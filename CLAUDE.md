@@ -20,6 +20,8 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
   and fetches the private repo with the `CORE_TOKEN` secret)
 - Run: `python simple_sheets.py [file]`
 - Test: `python -m pytest`
+- Test headless (no windows on your screen, Linux + Xvfb in Docker/colima, ~30 s): `tools/test_headless.sh [pytest args]`
+  (mounts this repo and `../simple-core` read-only; the image is built once from the requirements)
 - Build: `build.bat` → `dist\SimpleSheets.exe` + `dist\SimpleSheets-Setup.exe` (installer with the app inside) + `.sha256` + `SimpleSheets-portable.zip` (`python -m simplecore.package`). Close any running copy first; it locks the exe. From bash: `cmd //c build.bat`.
 - Version: bump `APP_VERSION` in `version.py` (used by the app, installer and Settings > Apps).
 - Installer (`installer.py` → `simplecore.installer`): per-user, no admin. Installs to `%LOCALAPPDATA%\Programs\SimpleSheets`, Start menu shortcut, "Open with" for .xlsx/.xlsm/.xlsb/.xls/.ods/.csv/.tsv (HKCU registry), uninstaller in Settings > Apps (`Uninstall.exe --uninstall`). Silent: `Setup.exe /S [/D=folder] [/desktop] [/noopenwith] [/relaunch]` (log in `%TEMP%\SimpleSheets-setup.log`). Tests use the scratch key `HKCU\Software\SimpleSheetsTest`, never the real Classes keys.

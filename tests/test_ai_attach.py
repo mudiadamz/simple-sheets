@@ -419,7 +419,7 @@ def test_attached_data_goes_to_scripts_not_retyped(app, tmp_path):
 
 def test_working_line_and_stop(app, tmp_path):
     router = SlowRouter("late answer")
-    router.delay = 1.2
+    router.delay = 3.0          # (well after the checks below, also on a slow CI machine)
     a = ai.Assistant(app, router)
     a.attach(str(csv_file(tmp_path, 3)))
     a.send("replace with this data")
@@ -433,7 +433,7 @@ def test_working_line_and_stop(app, tmp_path):
     assert len(set(lit)) == 2 and lit.count(theme.C["accent"]) == 1
     assert any(a.send_btn.type(i) == "rectangle" for i in a.send_btn.find_all())   # ■ stop button
     assert a.stop() and not a.busy
-    time.sleep(1.4)
+    time.sleep(3.2)
     for _ in range(20):
         app.update()
         time.sleep(0.02)

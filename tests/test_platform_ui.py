@@ -84,10 +84,13 @@ def test_grid_two_finger_scroll(app):
     app.set_cells([(r, c, "x") for r in range(200) for c in range(3)])
     app.update()
     step = g.rowh
-    for _ in range(4):                                  # small pixel moves add up to whole rows
-        g.on_touchpad(Pad(0, -step // 2))
-    assert g.top == 2 and g.left == 0
-    g.on_touchpad(Pad(0, step * 2))                     # fingers the other way: back up
+    g.on_touchpad(Pad(0, -(step - 1)))                  # less than a row: waits
+    assert g.top == 0
+    g.on_touchpad(Pad(0, -1))                           # small pixel moves add up to a whole row
+    assert g.top == 1 and g.left == 0
+    g.on_touchpad(Pad(0, -2 * step))
+    assert g.top == 3
+    g.on_touchpad(Pad(0, 3 * step))                     # fingers the other way: back up
     assert g.top == 0
     g.on_touchpad(Pad(-g.colw(0), 0))                   # sideways: one column
     assert g.left == 1 and g.top == 0
@@ -97,11 +100,9 @@ def test_grid_two_finger_scroll(app):
 
 def test_touchpad_bound_when_tk_has_it(app):
     g = app.table
-    try:
-        app.tk.call("bind", "all", "<TouchpadScroll>")
-        has_event = True
-    except tk.TclError:
-        has_event = False
+    probe = tk.Frame(app)
+    has_event = platform_ui.bind_touchpad(probe, lambda e: None)   # Tk 9: yes; Tk 8.6 (Linux CI): no event
+    probe.destroy()
     assert bool(g.cv.bind("<TouchpadScroll>")) == has_event
 
 

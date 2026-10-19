@@ -282,6 +282,10 @@ def test_mac_native_widgets_match(app):
     import pytest
     if sys.platform != "darwin":
         pytest.skip("macOS only")
+    try:
+        app.wm_attributes("-appearance")
+    except Exception:
+        pytest.skip("this Tk (8.6) has no -appearance")
     app.set_theme(False)
     assert app.wm_attributes("-appearance") == "auto"
     app.dark_var.set(True)
