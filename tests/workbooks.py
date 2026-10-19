@@ -27,6 +27,23 @@ def styled(path):
     return path
 
 
+def circular_pivot(path):
+    """A small pivot whose counts point at their own cell (B3) instead of the header (B$2): #CIRC!."""
+    wb = openpyxl.Workbook()
+    data = wb.active
+    data.title = "ISP"
+    data.append(["Key", "Assignee", "Status"])
+    for row in (["ISP-1", "Ana", "To Do"], ["ISP-2", "Ana", "Done"], ["ISP-3", "Bo", "To Do"]):
+        data.append(row)
+    p = wb.create_sheet("Pivot")
+    p.append(["Count"])
+    p.append(["Assignee", "To Do", "Done", "Total"])
+    for r, who in ((3, "Ana"), (4, "Bo")):
+        p.append([who] + [f"=COUNTIFS(ISP!$B$2:$B$4,A{r},ISP!$C$2:$C$4,{c}{r})" for c in "BC"] + [f"=SUM(B{r}:C{r})"])
+    wb.save(path)
+    return path
+
+
 def plain(path):
     """Two sheets of plain values."""
     wb = openpyxl.Workbook()

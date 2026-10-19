@@ -804,6 +804,7 @@ class Engine:
         self.memo = {}
         self.spill = None
         self.deps, self.range_deps, self.volatile = {}, {}, set()
+        self.loops = {}             # formula cell -> {cells it read that were still being calculated: #CIRC!}
 
     def invalidate(self, cells):
         """Some cells' texts changed: forget the results of exactly those cells and every formula that
@@ -836,6 +837,7 @@ class Engine:
             self.memo.pop(k, None)
             self.deps.pop(k, None)
             self.range_deps.pop(k, None)
+            self.loops.pop(k, None)
             self.volatile.discard(k)
         return seen
 
@@ -868,6 +870,53 @@ class Engine:
             return cached
         return text(v) if not isinstance(v, XLError) else str(v)
 
+    def circle(self, sheet_obj, r, c, limit=20000):
+        """Why a cell shows #CIRC!: the loop of formula cells it runs into -> [(sheet, r, c), ..., the first one
+        again] (just [x, x] when a cell uses itself), or None. The loop may not start at this cell (=SUM(B3:E3)
+        when B3 uses itself)."""
+        name = self.ids.get(id(sheet_obj))
+        if name is None:
+            return None
+        self.display(sheet_obj, r, c)                    # (calculating it records what each formula read)
+
+        def is_formula(k):
+            rows = self.book[k[0]].rows
+            t = rows[k[1]][k[2]] if k[1] < len(rows) and k[2] < len(rows[k[1]]) else ""
+            return len(t) > 1 and t[0] == "="
+
+        def reads(k):
+            found = set(self.deps.get(k, ())) | self.loops.get(k, set())
+            budget = limit
+            for sheet, r1, c1, r2, c2 in self.range_deps.get(k, ()):
+                rows = self.book[sheet].rows
+                for rr in range(r1, min(r2, len(rows) - 1) + 1):
+                    for cc in range(c1, min(c2, len(rows[rr]) - 1) + 1):
+                        budget -= 1
+                        if budget < 0:
+                            return found
+                        found.add((sheet, rr, cc))
+            return {x for x in found if is_formula(x)}
+
+        start = (name, r, c)
+        path, on_path, done = [start], {start}, set()
+        todo = [iter(sorted(reads(start)))]
+        while todo:                                      # depth first, remembering the way here
+            nxt = next(todo[-1], None)
+            if nxt is None:                              # all it reads looked at: step back
+                todo.pop()
+                left = path.pop()
+                done.add(left)
+                on_path.discard(left)
+                continue
+            if nxt in on_path:                           # back to a cell on the way: that's the loop
+                return path[path.index(nxt):] + [nxt]
+            if nxt in done or len(path) > 200:
+                continue
+            path.append(nxt)
+            on_path.add(nxt)
+            todo.append(iter(sorted(reads(nxt))))
+        return None
+
     def cell(self, sheet, r, c):
         key = (sheet, r, c)
         if self.stack and self.stack[-1] != key:      # the formula being calculated reads this cell
@@ -881,10 +930,13 @@ class Engine:
                 if self.iterate:
                     self.cycle = True
                     return self.prev.get(key, 0.0)
+                if self.stack:                            # (who read it: the loop's last step, for circle())
+                    self.loops.setdefault(self.stack[-1], set()).add(key)
                 return CIRC
             self.busy.add(key)
             self.deps.pop(key, None)
             self.range_deps.pop(key, None)
+            self.loops.pop(key, None)
             if VOLATILE.search(t):
                 self.volatile.add(key)
             self.stack.append(key)    # the cell being calculated (ROW() / COLUMN() without arguments)

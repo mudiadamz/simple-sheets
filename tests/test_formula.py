@@ -75,6 +75,23 @@ def test_circular_reference():
     assert eng.display(s, 0, 0) == "#CIRC!"
 
 
+def test_circle_names_the_loop():
+    """The pivot-table mistake: a criterion pointing at its own cell (B2) instead of the header (B$1)."""
+    s = Sheet([["Who", "Open", "Total", "Name", "State"],
+               ["Ana", '=COUNTIFS(D:D,A2,E:E,B2)', "=SUM(B2:B2)", "Ana", "Open"],
+               ["", "=A4", "1"], ["=B3", "", ""]])
+    eng = Engine()
+    eng.set_book({"Pivot": s, "Other": Sheet([["=Pivot!A1"]])})
+    assert eng.display(s, 1, 1) == "#CIRC!"
+    assert eng.circle(s, 1, 1) == [("Pivot", 1, 1), ("Pivot", 1, 1)]          # B2 uses itself
+    assert eng.circle(s, 1, 2) == [("Pivot", 1, 1), ("Pivot", 1, 1)]          # (C2 sums B2, which does)
+    assert eng.circle(s, 2, 1) == [("Pivot", 2, 1), ("Pivot", 3, 0), ("Pivot", 2, 1)]   # B3 → A4 → B3
+    assert eng.circle(s, 0, 0) is None                                        # (no loop)
+    s.rows[1][1] = '=COUNTIFS(D:D,A2,E:E,B$1)'                                # fixed: no more loop
+    eng.clear()
+    assert eng.display(s, 1, 1) == "1" and eng.circle(s, 1, 1) is None
+
+
 def test_long_chain_does_not_overflow():
     s = Sheet([["1"]] + [[f"=A{i}+1"] for i in range(1, 5000)])
     eng = Engine()

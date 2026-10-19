@@ -1087,6 +1087,8 @@ class App(tk.Tk):
             self.status["text"] = f"{rows:,} rows{note}"
             self.status.configure(cursor="hand2" if note else "")
             v = g.value(*g.span(*g.cur)[:2])
+            if v == "#CIRC!":                        # say which cells go round in a circle
+                self.status["text"] = self.circle_text(*g.span(*g.cur)[:2])
             if hasattr(v, "url"):                    # an =IMAGE() cell: say why its picture isn't showing
                 import cell_images
                 st, why = cell_images.state(v.url)
@@ -1094,6 +1096,24 @@ class App(tk.Tk):
                     self.status["text"] = f"Picture not shown: {why}"
                 elif st == "loading":
                     self.status["text"] = "Loading the picture…"
+
+    def circle_text(self, r, c):
+        """The status bar for a #CIRC! cell: "Circular reference: B3 uses itself" / "B3 → C5 → B3"."""
+        loop = self.engine.circle(self.table.sheet, r, c)
+        if not loop:
+            return "Circular reference: a formula here ends up using its own result"
+
+        def name(k):
+            ref = f"{col_name(k[2])}{k[1] + 1}"
+            return ref if k[0] == self.sheet else f"{k[0]}!{ref}"
+        here = (self.sheet, r, c)
+        if len(loop) == 2:
+            text = f"{name(loop[0])} uses itself"
+        else:
+            text = " → ".join(name(k) for k in loop)
+        if here not in loop:
+            text += f" (this cell uses {name(loop[0])})"
+        return f"Circular reference: {text} - change that formula to point at another cell"
 
     def value_commit(self, _=None):
         g = self.table
