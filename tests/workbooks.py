@@ -27,6 +27,22 @@ def styled(path):
     return path
 
 
+def patterns(path):
+    """A2: red diagonal stripes on yellow; A3: grey dots (no background); B2: long text, shrink to fit, narrow."""
+    from openpyxl.styles import Alignment, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "head"
+    ws["A2"] = "striped"
+    ws["A2"].fill = PatternFill("darkDown", fgColor="FFFF0000", bgColor="FFFFFF00")
+    ws["A3"].fill = PatternFill("lightGray", fgColor="FF808080")
+    ws["B2"] = "A long text that fits drawn smaller"
+    ws["B2"].alignment = Alignment(shrink_to_fit=True)
+    ws.column_dimensions["B"].width = 20
+    wb.save(path)
+    return path
+
+
 def circular_pivot(path):
     """A small pivot whose counts point at their own cell (B3) instead of the header (B$2): #CIRC!."""
     wb = openpyxl.Workbook()

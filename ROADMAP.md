@@ -25,10 +25,10 @@ what Simple Sheets already does, and what is open for future work.
 - [x] `.ods` (OpenDocument) – read and write values, formulas and formatting
   - [x] **P2** read formulas (OpenFormula → Excel) + formatting, number formats, widths, heights, merges, hidden parts
   - [x] **P3** write `.ods` (values, formulas, number formats, fonts, colours, borders, merges, sizes)
-- [~] **P3** `.xlsb` (binary Excel): read values, dates and hidden sheets (formulas as results, no formatting); save goes to `.xlsx`
+- [x] **P3** `.xlsb` (binary Excel): values, dates, hidden sheets, formatting and formulas; save as `.xlsb` (see R2 below)
 - [x] **P3** templates (`.xltx` / `.xltm`): open, save as template, ☰ → New from template
 - [x] **P3** password-protected / encrypted files: open with the password (Agile + Standard encryption, own AES); saved without a password (Save as)
-- [~] large files – over 15 MB: values + formats only (no widths / merges / hidden); rows to load is a setting (50,000), more on request
+- [x] large files – over 15 MB: values, formats, column widths, row heights, merges, hidden rows / columns and frozen panes (streamed from the sheet XML: `sheet_io.light_layout`); rows to load is a setting (50,000), more on request
   - [x] **P2** load in the background with a progress bar (and Cancel)
   - [x] **P3** rows to load is a setting; click the status bar to load every row of a long sheet
 
@@ -64,7 +64,7 @@ what Simple Sheets already does, and what is open for future work.
   - [x] **P3** create / remove validation rules (Data → Data validation)
 - [x] images – shown and kept
   - [x] **P3** show images on the grid (PNG / GIF; other formats as a labelled box)
-- [~] **P3** shapes, text boxes, form controls, slicers, sparklines: not kept by openpyxl - the app now warns before a save would drop them
+- [~] **P3** shapes, text boxes, connectors and sparklines are put back after openpyxl saves (`keep_parts.py`); form controls, slicers and timelines still aren't - the app warns before a save would drop them (keeping them means rebuilding control properties, the legacy VML drawing shared with comments, and workbook-level slicer caches: to do with a real Excel to check against)
 - [x] **P3** "Text to columns", remove duplicates, flash fill (Ctrl+E)
 
 ## 4. Formulas
@@ -87,16 +87,16 @@ what Simple Sheets already does, and what is open for future work.
 ## 5. Formatting
 
 - [x] bold, italic, underline, font size, text style presets
-- [~] strikethrough – read / saved, no toolbar button
+- [x] strikethrough – read / saved, toolbar button
 - [x] font family – shown and editable
   - [x] **P2** font family picker and display
 - [x] text colour, fill colour (theme colours + tints read correctly)
-- [~] gradient / pattern fills – kept, shown as plain
+- [x] gradient / pattern fills – kept; gradients shown as their average colour, patterns (stripes, dots, grids, trellis) drawn with a matching stipple in their own colour
 - [x] horizontal align (dropdown), vertical align (dropdown), wrap text, merge / unmerge / merge & center
 - [x] borders: 10 placements, 6 line styles, colour (diagonals kept, not editable)
 - [x] number formats displayed like Excel (decimals, thousands, %, currency, dates, times, negatives)
   - [x] **P2** number format picker (General, Number, Currency, Percent, Date, Custom…), more / fewer decimals
-- [~] indent, text rotation, shrink-to-fit – kept, not shown
+- [x] indent, text rotation, shrink-to-fit – shown, set from the toolbar (⇤ ⇥, ⟲ menu with Shrink to fit), saved
 - [x] table styles (applied as cell formatting); real Excel tables in a file are kept and resized with inserted/deleted rows/columns
   - [x] **P3** real Excel tables: style banding, ▼ filter buttons (filter saved in the table), the table grows when typing below it
 - [x] conditional formatting – shown, created, kept
@@ -139,7 +139,7 @@ what Simple Sheets already does, and what is open for future work.
 - [x] **P2** sort (A→Z, Z→A, sort range dialog with header row; keeps rows together)
 - [x] autofilter – header buttons, filter by value / condition, saved
   - [x] **P2** filter buttons in the header row, filter by value / condition
-- [~] **P3** pivot tables: kept on save by openpyxl (not checked with a real pivot file here); Data → Pivot table makes a summary sheet
+- [x] **P3** pivot tables: kept on save; Data → Pivot table builds real Excel pivot tables (see R2 below)
 - [x] **P3** charts: shown over the grid, Insert → Chart, right-click → Delete chart, saved
 - [x] **P3** what-if: goal seek
 
@@ -156,7 +156,7 @@ what Simple Sheets already does, and what is open for future work.
 
 ## 10. Protection & security
 
-- [~] sheet protection – enforced, protect / unprotect; workbook-structure protection kept, not enforced
+- [x] sheet protection – enforced, protect / unprotect; workbook-structure protection enforced (no adding, deleting, renaming, moving, hiding or copying sheets), ☰ → Sheet → Protect / Unprotect workbook with a password, saved for Excel
   - [x] **P3** locked cells respected on protected sheets; protect / unprotect with password; lock / unlock cells
 - [x] macros kept in `.xlsm` (never run)
 - [x] **P3** open password-protected files (see 1)
@@ -179,8 +179,8 @@ what Simple Sheets already does, and what is open for future work.
 - [x] **P2** warn when the file changed on disk (offer reload; ask before overwriting), show when it's locked by Excel
 - [x] **P3** several workbooks in one window (tabs): ☰ → New tab (Ctrl+T) / Open in new tab; Settings → open files in tabs
 - [x] **P3** settings dialog (language, recovery interval, rows to load, tabs, update feed)
-- [~] **P3** menus in English / Bahasa Indonesia / Español; keyboard: F10 menu, Shift+F10 context menu, Ctrl+PgUp/PgDn sheets. Screen readers: not possible with Tk
-- [~] **P3** code signing in build.bat / CI when a certificate is set (none here yet); update check against a release feed (no automatic install)
+- [~] **P3** the whole UI in English / Bahasa Indonesia / Español; keyboard: F10 menu, Shift+F10 context menu, Ctrl+PgUp/PgDn sheets. Screen readers: not possible with Tk
+- [~] **P3** code signing in build.bat / CI when a certificate is set (none here yet); updates download, check their SHA-256 and install at the next start
 - [~] **P3** macOS / Linux builds (`build.sh`, CI jobs) - not tried on those systems yet
 
 ## 13. Project

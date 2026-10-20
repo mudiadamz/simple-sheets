@@ -12,6 +12,8 @@ rest of an Excel file (charts, pictures, macros, pivot tables) stays as it was.
 - New from template makes an untitled workbook from a template; the template itself never changes.
 - If Simple Sheets closes unexpectedly, your unsaved work is offered back the next time it starts.
 - If another program changes the file while it's open, you're asked whether to reload it.
+- Very big files (over 15 MB) open with their values, formats, column widths, merges, hidden rows / columns
+  and frozen panes; the first 50,000 rows come at once and more on request.
 
 ## Entering data
 
@@ -38,6 +40,8 @@ rest of an Excel file (charts, pictures, macros, pivot tables) stays as it was.
 
 - The toolbar has fonts, sizes, bold / italic / underline, colours, alignment, wrap, borders,
   number formats, table styles and Excel's cell styles (Good, Bad, Heading 1…).
+- ⟲ (rotate text) also has Shrink to fit: text too long for its cell is drawn smaller instead of cut off.
+- Pattern fills from Excel (stripes, dots, grids) are shown and kept; picking a fill colour makes it plain.
 - 🖌 Format painter copies the formatting of the selection to the next cells you select.
 - Data → Conditional formatting colours cells by their value, text, duplicates, top / bottom,
   colour scales or data bars. Data → Data validation makes drop-down lists and limits.
@@ -45,6 +49,8 @@ rest of an Excel file (charts, pictures, macros, pivot tables) stays as it was.
 ## Sheets, rows and columns
 
 - Right-click a sheet tab to rename, duplicate, hide, colour, protect or copy it to a new workbook.
+- ☰ → Sheet → Protect workbook… locks the workbook's structure: sheets can't be added, deleted, renamed,
+  moved, hidden or copied (cells still change). Unprotect workbook… takes it off (with its password).
 - Right-click row / column headers to insert, delete, hide or resize; Data → Group makes
   collapsible groups (−/+ in the header).
 - View: gridlines, headings, formulas, full screen (F11), split window, dark mode.

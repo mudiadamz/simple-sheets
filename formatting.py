@@ -12,6 +12,10 @@ DEFAULT_SIZE = 11.0                # Excel's default font size (pt)
 DEFAULT_FONT = "Calibri"           # Excel's default font (cells in it aren't given a "font" key)
 # cell borders: style["border"] = {side: [line style, "#rrggbb"]}, sides from this list
 SIDES = ("left", "right", "top", "bottom")
+# Excel's pattern fills (the ones besides "solid"): shown with a matching stipple in the grid (grid.pattern_stipple)
+PATTERNS = ("gray0625", "gray125", "lightGray", "mediumGray", "darkGray", "lightHorizontal", "darkHorizontal",
+            "lightVertical", "darkVertical", "lightDown", "darkDown", "lightUp", "darkUp", "lightGrid", "darkGrid",
+            "lightTrellis", "darkTrellis")
 BORDER_STYLES = ("thin", "medium", "thick", "dashed", "dotted", "double")
 
 # text-style presets: font keys only, other formatting (fill, align, number format) is kept
@@ -538,6 +542,15 @@ def cell_style(cell, theme, cache):
         bg = color_hex(fill.fgColor, theme)
         if bg:
             st["bg"] = bg
+    elif getattr(fill, "fill_type", None) in PATTERNS:   # a pattern (dots, stripes, grid…) over a background
+        st["pattern"] = fill.fill_type
+        st["pattern_fg"] = color_hex(fill.fgColor, theme) or "#000000"
+        back = fill.bgColor
+        system = (getattr(back, "type", None) == "indexed" and back.indexed in (64, 65)) or \
+            (getattr(back, "type", None) == "rgb" and str(back.rgb).startswith("00"))   # (no background: white)
+        bg = None if system else color_hex(back, theme)
+        if bg:
+            st["bg"] = bg
     elif getattr(fill, "stop", None):              # a gradient: shown as the average of its colours
         cols = [color_hex(s.color, theme) for s in (fill.stop or [])]
         cols = [x for x in cols if x]
@@ -552,6 +565,8 @@ def cell_style(cell, theme, cache):
         st["wrap"] = True
     if getattr(al, "indent", None):
         st["indent"] = int(al.indent)
+    if getattr(al, "shrink_to_fit", None):
+        st["shrink"] = True
     rot = getattr(al, "text_rotation", None)
     if rot:
         st["rotate"] = 90 - rot if 90 < rot <= 180 else rot   # Excel: 91-180 means 1-90 degrees downwards

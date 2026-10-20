@@ -122,7 +122,7 @@ class SheetTabs(ttk.Frame):
 
     def start_rename(self, name):
         """Edit box placed right over the tab's name."""
-        if self.app.sheet_protected(name, "renamed"):
+        if self.app.sheet_protected(name, "renamed") or self.app.structure_locked():
             return
         self.cancel_rename()
         self.app.show(name)

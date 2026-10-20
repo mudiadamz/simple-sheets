@@ -161,6 +161,9 @@ def read_book(path):
         scripts = read_scripts(wb)
         if scripts:
             out["scripts"] = scripts
+        structure = read_structure(getattr(wb, "security", None))
+        if structure is not None:
+            out["structure"] = structure
         calc = getattr(wb, "calculation", None)
         if calc is not None:
             if calc.calcMode == "manual":
@@ -212,11 +215,44 @@ def write_scripts(wb, scripts):
             plist.append(StringProperty(name=f"{SCRIPTS_PROP}.{i // PART + 1}", value=text[i:i + PART]))
 
 
+def read_structure(sec):
+    """Workbook-structure protection (sheets can't be added, deleted, renamed, moved, hidden) -> the dict
+    check_password takes ({} = no password), or None when the structure isn't locked."""
+    if sec is None or not getattr(sec, "lockStructure", None):
+        return None
+    out = {"hash": sec.workbookHashValue, "salt": sec.workbookSaltValue, "spin": sec.workbookSpinCount,
+           "algo": sec.workbookAlgorithmName, "password": sec.workbookPassword}
+    return {k: v for k, v in out.items() if v}
+
+
+def write_structure(wb, structure):
+    """Lock (structure: the dict from read_structure / protect_book) or unlock the workbook's structure; the
+    other locks (windows, revisions) stay as the file had them."""
+    from openpyxl.workbook.protection import WorkbookProtection
+    sec = wb.security
+    if structure is None:
+        if sec is not None and sec.lockStructure:
+            sec.lockStructure = False
+            sec._workbookPassword = None              # (openpyxl's setter would try to hash None)
+            for k in ("workbookHashValue", "workbookSaltValue", "workbookSpinCount", "workbookAlgorithmName"):
+                setattr(sec, k, None)
+        return
+    if sec is None:
+        sec = wb.security = WorkbookProtection()
+    sec.lockStructure = True
+    if structure.get("hash"):
+        sec.workbookHashValue, sec.workbookSaltValue = structure["hash"], structure.get("salt")
+        sec.workbookSpinCount, sec.workbookAlgorithmName = structure.get("spin"), structure.get("algo")
+    elif structure.get("password"):              # (the legacy hash as stored: openpyxl's setter would hash it again)
+        sec.set_workbook_password(structure["password"], already_hashed=True)
+
+
 def apply_book(wb, props):
     pr = wb.properties
     for k in DOC_KEYS:
         setattr(pr, k, props.get(k) or None)
     write_scripts(wb, props.get("scripts"))
+    write_structure(wb, props.get("structure"))
     calc = wb.calculation
     calc.calcMode = "manual" if props.get("calc") == "manual" else "auto"
     calc.iterate = bool(props.get("iterate"))

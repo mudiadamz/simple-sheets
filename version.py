@@ -18,6 +18,7 @@ appinfo.configure(
     extensions=(".xlsx", ".xlsm", ".xlsb", ".xls", ".ods", ".csv", ".tsv"),
     file_kind="Spreadsheet", doc_noun="spreadsheet", icon="simple_sheets.ico",
     root=os.path.dirname(os.path.abspath(__file__)),
+    accent="#107c41", accent_dark="#4cc38a",       # the app's green (its icon, Excel's)
 )
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

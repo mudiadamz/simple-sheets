@@ -167,7 +167,8 @@ def test_toolbar_button_toggles_pane(app):
     app.set_theme(True)
     try:
         app_menu.refresh_ai_button(app)
-        assert str(b.cget("background")) == theme.DARK["accent"] and str(b.cget("foreground")) == theme.DARK["on_accent"]
+        assert theme.C["dark"] and theme.C["accent"] == "#4cc38a"            # (the app's own green, dark shade)
+        assert str(b.cget("background")) == theme.C["accent"] and str(b.cget("foreground")) == theme.DARK["on_accent"]
     finally:
         app.set_theme(False)
 
@@ -219,7 +220,7 @@ def test_composer_is_one_compact_box(app):
 def test_privacy_notice_now_in_settings(app):
     a = ai.Assistant(app, FakeRouter())
     d = a.settings()
-    texts = [w.cget("text") for w in d.win.winfo_children()[0].winfo_children()
+    texts = [w.cget("text") for w in d.dialog.body.winfo_children()            # (the shared dialog's body)
              if w.winfo_class() in ("TLabel", "Label")]
     assert any("go to OpenRouter" in str(t) for t in texts)
     d.win.destroy()

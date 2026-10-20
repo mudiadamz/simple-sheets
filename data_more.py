@@ -283,8 +283,7 @@ def add_table_sheet(app, base, table, styles=None):
         items.insert(list(app.sheets).index(app.sheet) + 1, (name, s))
         app.sheets.clear()
         app.sheets.update(items)
-    app.book_change(mutate, name)
-    return name
+    return name if app.book_change(mutate, name) else None
 
 
 def pivot(app):

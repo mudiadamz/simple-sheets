@@ -899,7 +899,10 @@ class App(tk.Tk):
 
     def book_change(self, mutate, select, also=()):
         """Run mutate() (changes self.sheets) as one undo step, then show `select`.
-        also: more (kind, sheet, r, c, new value) changes made in the same step."""
+        also: more (kind, sheet, r, c, new value) changes made in the same step. -> False when the workbook's
+        structure is protected (nothing changed)."""
+        if self.structure_locked():
+            return False
         self.table.commit()
         before = self.book_state()
         mutate()
@@ -909,6 +912,17 @@ class App(tk.Tk):
             extra.append((kind, sheet, r, c, self.read(kind, sheet, r, c), val))
             self.write_cell(kind, sheet, r, c, val)
         self.push([("b", None, 0, 0, before, self.book_state(select))] + extra)
+        return True
+
+    def structure_locked(self, warn=True):
+        """Workbook-structure protection: sheets can't be added, deleted, renamed, moved, hidden or copied."""
+        if self.book_props.get("structure") is None:
+            return False
+        if warn:
+            messagebox.showinfo("Protected workbook", "The workbook's structure is protected: sheets can't be "
+                                "added, deleted, renamed, moved, hidden or copied.\n\n"
+                                "Use ☰ → Sheet → Unprotect workbook… to change that.", parent=self)
+        return True
 
     def after_book_change(self):
         cur = self.table.sheet
@@ -975,8 +989,7 @@ class App(tk.Tk):
             self.names = {k: formula.rename_sheet(t, old, new) for k, t in self.names.items()}
         import cell_scripts
         moved = cell_scripts.renamed(self, old, new)          # cell scripts follow their sheet
-        self.book_change(mutate, new, [("wp", None, 0, "scripts", moved)] if moved else ())
-        return True
+        return self.book_change(mutate, new, [("wp", None, 0, "scripts", moved)] if moved else ())
 
     def move_sheet(self, name, index):
         """Move a sheet to position `index` among the visible tabs (hidden sheets keep their slots)."""
@@ -1008,11 +1021,10 @@ class App(tk.Tk):
 
         def mutate():
             self.sheets[name].hidden = hide
-        self.book_change(mutate, select)
-        return True
+        return self.book_change(mutate, select)
 
     def delete_sheet(self, name):
-        if self.sheet_protected(name, "deleted"):
+        if self.sheet_protected(name, "deleted") or self.structure_locked():
             return False
         if self.visible_sheets() == [name]:
             messagebox.showwarning("Delete sheet", "A workbook needs at least one visible sheet.")
@@ -1026,8 +1038,7 @@ class App(tk.Tk):
             del self.sheets[name]
             self.fix_formulas(lambda t: formula.rename_sheet(t, name, None))
             self.names = {k: t for k, t in self.names.items() if formula.rename_sheet(t, name, None) == t}
-        self.book_change(mutate, neighbour)
-        return True
+        return self.book_change(mutate, neighbour)
 
     # ---------- undo / redo ----------
 

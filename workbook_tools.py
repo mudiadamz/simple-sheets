@@ -78,8 +78,7 @@ def duplicate_sheet(app, name):
         items.insert(at, (base, new))
         app.sheets.clear()
         app.sheets.update(items)
-    app.book_change(mutate, base)
-    return base
+    return base if app.book_change(mutate, base) else None
 
 
 def copy_to_new_workbook(app, name, dst=None):
@@ -135,6 +134,36 @@ def unprotect_sheet(app, password=None):
             messagebox.showerror("Unprotect sheet", "The password isn't right.", parent=app)
             return False
     app.apply_mixed([("sp", 0, "protect", None)])
+    return True
+
+
+def protect_book(app, password=None):
+    """Protect the workbook's structure: sheets can't be added, deleted, renamed, moved, hidden or copied."""
+    app.table.commit()
+    if password is None:
+        password = simpledialog.askstring("Protect workbook", "Sheets can't be added, deleted, renamed, moved or "
+                                          "hidden while it's protected.\n\nPassword (optional):", show="•",
+                                          parent=app)
+        if password is None:
+            return False
+    app.apply_cells([("wp", None, 0, "structure",
+                      {"password": sheet_props.legacy_hash(password)} if password else {})])
+    return True
+
+
+def unprotect_book(app, password=None):
+    prot = app.book_props.get("structure")
+    if prot is None:
+        return True
+    if prot.get("password") or prot.get("hash"):
+        if password is None:
+            password = simpledialog.askstring("Unprotect workbook", "Password:", show="•", parent=app)
+            if password is None:
+                return False
+        if not sheet_props.check_password(prot, password):
+            messagebox.showerror("Unprotect workbook", "The password isn't right.", parent=app)
+            return False
+    app.apply_cells([("wp", None, 0, "structure", None)])
     return True
 
 

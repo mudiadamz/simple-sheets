@@ -116,6 +116,12 @@ def load_xlsx(path, progress=None):
     wb_f = openpyxl.load_workbook(path, read_only=True, data_only=False)
     theme = theme_colors(getattr(wb_v, "loaded_theme", None))
     out = {}
+    layout = {}
+    if not full:                     # big file: its widths, merges, hidden rows / columns read on their own
+        try:
+            layout = light_layout(path)
+        except Exception:            # (an odd file: values and formats still come)
+            layout = {}
     n_sheets = max(len(wb_v.worksheets), 1)
     for i, (ws_v, ws_f) in enumerate(zip(wb_v.worksheets, wb_f.worksheets)):
         rows, styles, cache, style_cache, links, comments, rich = [], {}, {}, {}, {}, {}, {}
@@ -165,7 +171,15 @@ def load_xlsx(path, progress=None):
                         widths[c] = dim.width
             merges = [(m.min_row - 1, m.min_col - 1, m.max_row - 1, m.max_col - 1)
                       for m in ws_v.merged_cells.ranges]
+        lay = layout.get(ws_v.title)
+        if lay:
+            widths, heights = lay["widths"], lay["heights"]
+            merges = [m for m in lay["merges"] if m[0] < MAX_ROWS]
         sheet = out[ws_v.title] = Sheet(rows, styles, widths, merges, heights)
+        if lay:
+            sheet.hidden_rows, sheet.hidden_cols = set(lay["hidden_rows"]), set(lay["hidden_cols"])
+            if lay["freeze"]:
+                sheet.freeze = lay["freeze"]
         sheet.cache = cache
         sheet.links = links
         sheet.comments = comments
@@ -198,6 +212,73 @@ def load_xlsx(path, progress=None):
                     sheet.hidden_cols.update(range(d.min - 1, min(d.max or d.min, d.min + 500)))
     wb_v.close()
     wb_f.close()
+    return out
+
+
+MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+REL_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+
+
+def sheet_parts(z):
+    """{sheet name: its XML part in the zip} from xl/workbook.xml and its relationships."""
+    import posixpath
+    import xml.etree.ElementTree as ET
+    rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+    target = {r.get("Id"): r.get("Target") for r in rels}
+    out = {}
+    for s in ET.fromstring(z.read("xl/workbook.xml")).iter(MAIN_NS + "sheet"):
+        t = target.get(s.get(REL_ID))
+        if t:
+            out[s.get("name")] = t.lstrip("/") if t.startswith("/") else posixpath.normpath(posixpath.join("xl", t))
+    return out
+
+
+def light_layout(path, max_rows=None):
+    """The layout of a big .xlsx without loading it (streamed from each sheet's XML): {sheet name: {"widths",
+    "hidden_cols", "heights", "hidden_rows", "merges", "freeze"}}. Rows past max_rows are left out."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    from formula import col_index
+    max_rows = max_rows or MAX_ROWS
+    out = {}
+    with zipfile.ZipFile(path) as z:
+        for name, part in sheet_parts(z).items():
+            lay = {"widths": {}, "hidden_cols": set(), "heights": {}, "hidden_rows": set(), "merges": [],
+                   "freeze": None}
+            try:
+                fh = z.open(part)
+            except KeyError:
+                continue
+            with fh:
+                for event, el in ET.iterparse(fh, events=("start", "end")):
+                    tag = el.tag[len(MAIN_NS):] if el.tag.startswith(MAIN_NS) else el.tag
+                    if event == "start":
+                        if tag == "row":                         # (only its attributes: known at its start)
+                            r = int(el.get("r") or 0) - 1
+                            if 0 <= r < max_rows:
+                                if el.get("customHeight") in ("1", "true") and el.get("ht"):
+                                    lay["heights"][r] = float(el.get("ht"))
+                                if el.get("hidden") in ("1", "true"):
+                                    lay["hidden_rows"].add(r)
+                        continue
+                    if tag == "col":
+                        lo, hi = int(el.get("min") or 1) - 1, int(el.get("max") or el.get("min") or 1) - 1
+                        for c in range(lo, min(hi, lo + 500) + 1):
+                            if el.get("width") and el.get("customWidth", "1") in ("1", "true"):
+                                lay["widths"][c] = float(el.get("width"))
+                            if el.get("hidden") in ("1", "true"):
+                                lay["hidden_cols"].add(c)
+                    elif tag == "mergeCell":
+                        m = re.fullmatch(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", el.get("ref") or "")
+                        if m:
+                            lay["merges"].append((int(m.group(2)) - 1, col_index(m.group(1)),
+                                                  int(m.group(4)) - 1, col_index(m.group(3))))
+                    elif tag == "pane" and el.get("state") in ("frozen", "frozenSplit"):
+                        lay["freeze"] = (int(float(el.get("ySplit") or 0)), int(float(el.get("xSplit") or 0)))
+                    if tag in ("row", "c", "v", "f", "is", "t", "col", "mergeCell"):
+                        el.clear()                               # (keep memory flat on huge sheets)
+            out[name] = lay
     return out
 
 
@@ -560,7 +641,7 @@ def apply_style(cell, st):
     Keeps the font name and diagonal borders."""
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     st = st or {}
-    old, al = cell.font, cell.alignment
+    old = cell.font
     fg = st.get("fg")
     name = st.get("font") or old.name
     cell.font = Font(name=name, family=old.family if name == old.name else None,
@@ -568,12 +649,15 @@ def apply_style(cell, st):
                      sz=st.get("size", DEFAULT_SIZE), b=st.get("bold", False), i=st.get("italic", False),
                      u="single" if st.get("underline") else None, strike=st.get("strike", False),
                      color="FF" + fg[1:].upper() if fg else None)
-    if not st.get("gradient"):              # a gradient from the file stays as it is
+    if st.get("pattern"):                   # a pattern fill: its pattern colour over the background
+        cell.fill = PatternFill(st["pattern"], fgColor="FF" + (st.get("pattern_fg") or "#000000")[1:].upper(),
+                                bgColor="FF" + st["bg"][1:].upper() if st.get("bg") else None)
+    elif not st.get("gradient"):            # a gradient from the file stays as it is
         cell.fill = PatternFill("solid", fgColor="FF" + st["bg"][1:].upper()) if st.get("bg") else PatternFill()
     rot = st.get("rotate") or 0
     cell.alignment = Alignment(horizontal=st.get("align"), vertical=st.get("valign"), wrap_text=bool(st.get("wrap")),
                                indent=st.get("indent", 0), text_rotation=90 - rot if rot < 0 else rot,
-                               shrink_to_fit=al.shrink_to_fit)
+                               shrink_to_fit=bool(st.get("shrink")))
     cell.number_format = st.get("numfmt", "General")
     old_b = cell.border
     sides = {}

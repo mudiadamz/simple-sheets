@@ -170,6 +170,8 @@ class FormatBar(ttk.Frame):
         for label, deg in (("None", 0), ("Angle up (45°)", 45), ("Angle down (−45°)", -45), ("Up (90°)", 90),
                            ("Down (−90°)", -90)):
             m.add_command(label=label, command=lambda d=deg: self.rotate(d))
+        m.add_separator()
+        m.add_command(label="Shrink to fit (on / off)", command=self.toggle_shrink)
         rot["menu"] = m
         self.rotate_menu = m
         self.wrap = tk.BooleanVar(self)
@@ -601,11 +603,20 @@ class FormatBar(ttk.Frame):
         self.app.format_cells(lambda st: {**st, "rotate": degrees or None})
         self.done()
 
+    def toggle_shrink(self):
+        """Shrink to fit: text too long for its cell is drawn smaller instead of cut off (the current cell decides
+        on / off for the whole selection)."""
+        g = self.app.table
+        on = not ((g.sheet.styles.get(g.span(*g.cur)[:2]) or {}).get("shrink"))
+        self.app.format_cells(lambda st: {**st, "shrink": True if on else None})
+        self.done()
+        return on
+
     def cell_style(self, name):
         """An Excel cell style: replaces the look (fonts, fill, borders), keeps number format and alignment."""
         from formatting import CELL_STYLES
         look = CELL_STYLES[name]
-        keep = ("numfmt", "align", "valign", "wrap", "unlocked")
+        keep = ("numfmt", "align", "valign", "wrap", "unlocked", "shrink", "indent", "rotate")
         self.app.format_cells(lambda st: {**{k: v for k, v in st.items() if k in keep}, **look})
         self.done()
 
@@ -654,7 +665,11 @@ class FormatBar(ttk.Frame):
         if col:
             self.colors[kind] = col
             self.draw_color_icons()
-            self.app.format_cells(lambda st: {**st, kind: col})
+            if kind == "bg":                  # a picked fill is plain: no pattern / gradient left over from the file
+                self.app.format_cells(lambda st: {**{k: v for k, v in st.items()
+                                                     if k not in ("pattern", "pattern_fg", "gradient")}, "bg": col})
+            else:
+                self.app.format_cells(lambda st: {**st, kind: col})
         self.done()
 
     def clear(self):

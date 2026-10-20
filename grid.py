@@ -1,6 +1,7 @@
 """Canvas spreadsheet grid: draws only visible cells; cell/range selection; in-place editor."""
 import csv
 import io
+import os
 import re
 import sys
 import tkinter as tk
@@ -17,6 +18,54 @@ from formula import quote_sheet, references, shift
 ALL = 1 << 20          # bound used for whole-row / whole-column selections
 REF_COLORS = ["#1a73e8", "#d93025", "#9334e6", "#188038", "#e8710a", "#007b83", "#b06000"]
 EXTRA_ROWS, EXTRA_COLS = 50, 10   # scroll room past the data
+
+
+# Excel pattern fills -> Tk stipples: the grey ones are Tk's own bitmaps, the line patterns small 8x8 XBM files
+GREYS = {"gray0625": "gray12", "gray125": "gray12", "lightGray": "gray25", "mediumGray": "gray50",
+         "darkGray": "gray75", "darkTrellis": "gray75"}
+LINES = {"lightHorizontal": (0xff, 0, 0, 0) * 2, "darkHorizontal": (0xff, 0xff, 0, 0) * 2,
+         "lightVertical": (0x11,) * 8, "darkVertical": (0x33,) * 8,
+         "lightDown": (0x11, 0x22, 0x44, 0x88) * 2, "darkDown": (0x33, 0x66, 0xcc, 0x99) * 2,
+         "lightUp": (0x88, 0x44, 0x22, 0x11) * 2, "darkUp": (0x99, 0xcc, 0x66, 0x33) * 2,
+         "lightGrid": (0xff, 0x11, 0x11, 0x11) * 2, "darkGrid": (0xff, 0xff, 0x33, 0x33) * 2,
+         "lightTrellis": (0x81, 0x42, 0x24, 0x18, 0x18, 0x24, 0x42, 0x81)}
+_stipples = {}
+
+
+def pattern_stipple(name):
+    """The Tk stipple for an Excel pattern fill ("gray25", or "@…/lightDown.xbm"), or None."""
+    if name in GREYS:
+        return GREYS[name]
+    bits = LINES.get(name)
+    if bits is None:
+        return None
+    if name not in _stipples:
+        import tempfile
+        folder = os.path.join(tempfile.gettempdir(), "SimpleSheets-patterns-2")
+        path = os.path.join(folder, name + ".xbm")
+        text = ("#define p_width 8\n#define p_height 8\nstatic char p_bits[] = {\n "   # (Tk wants "char")
+                + ", ".join(f"0x{b:02x}" for b in bits) + "};\n")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            if not os.path.exists(path):                      # written whole, then moved in place (several
+                tmp = f"{path}.{os.getpid()}.tmp"            # copies of the app may do this at once)
+                with open(tmp, "w", encoding="ascii") as fh:
+                    fh.write(text)
+                os.replace(tmp, path)
+            _stipples[name] = "@" + path.replace(os.sep, "/")
+        except OSError:
+            _stipples[name] = "gray50"                       # (no temp folder: a plain dotted look)
+    return _stipples[name]
+
+
+def pattern_ink(color):
+    """A pattern's colour; in dark mode a dark one is lightened so it still shows."""
+    color = color or "#000000"
+    if C.get("dark"):
+        r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+        if 0.299 * r + 0.587 * g + 0.114 * b < 90:
+            return "#9aa0a6"
+    return color
 
 
 def col_name(i):
@@ -948,6 +997,17 @@ class Grid(ttk.Frame):
         if bg:                             # plain cells: just the gridlines drawn by redraw
             grid = C["grid_line"] if self.sheet.props.get("grid") is not False else bg
             cv.create_rectangle(x, y, x + w, y + h, fill=bg, outline=grid)
+        if st and st.get("pattern"):        # a pattern fill (dots, stripes, grid…) in its colour over the background
+            stipple = pattern_stipple(st["pattern"])
+            if stipple:
+                ink = pattern_ink(st.get("pattern_fg"))
+                try:
+                    cv.create_rectangle(x + 1, y + 1, x + w, y + h, fill=ink, outline="", stipple=stipple,
+                                        tags="pattern")
+                except tk.TclError:                  # (the bitmap file couldn't be read: plain dots)
+                    _stipples[st["pattern"]] = "gray50"
+                    cv.create_rectangle(x + 1, y + 1, x + w, y + h, fill=ink, outline="", stipple="gray50",
+                                        tags="pattern")
         if bar:   # data bar: a coloured bar as long as the value is big
             frac, color = bar
             cv.create_rectangle(x + 2, y + 3, x + 2 + max(int((w - 4) * frac), 1), y + h - 3,
@@ -1001,13 +1061,19 @@ class Grid(ttk.Frame):
                            font=font, fill=fg, tags="txt")
             return
         disp = disp.split("\n", 1)[0]
-        if align == "left" and cols:  # spill into empty cells on the right, like Excel
+        if align == "left" and cols and not (st and st.get("shrink")):  # spill into empty cells on the right
             for c2_, _, w2 in cols:
                 if c2_ <= c:
                     continue
                 if self.text(r, c2_) or (r, c2_) in self.merge_at:
                     break
                 avail += w2
+        if st and st.get("shrink") and avail > 0 and font.measure(disp) > avail:   # shrink to fit: smaller font
+            size = max(3.0, int(st.get("size", DEFAULT_SIZE) * avail / font.measure(disp) * 2) / 2)
+            font = self.font({**st, "size": size})                               # (half points: few fonts made)
+            while font.measure(disp) > avail and size > 3.0:                     # (Tk rounds sizes: until it fits)
+                size -= 0.5
+                font = self.font({**st, "size": size})
         disp = self.fit(disp, font, avail, is_num)
         angle = st.get("rotate") if st else None
         if angle:                                    # rotated text: drawn turned around its middle

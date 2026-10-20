@@ -168,6 +168,10 @@ def sync_sheet(app, m):
     else:
         m.add_command(label="Protect sheet…", command=lambda: wt.protect_sheet(app))
     m.add_command(label="Lock / unlock cells", command=lambda: wt.toggle_locked(app))
+    if app.book_props.get("structure") is not None:            # sheets can't be added / deleted / renamed…
+        m.add_command(label="Unprotect workbook…", command=lambda: wt.unprotect_book(app))
+    else:
+        m.add_command(label="Protect workbook…", command=lambda: wt.protect_book(app))
     m.add_separator()
     import print_preview
     m.add_command(label="Insert page break", command=lambda: print_preview.insert_break(app))

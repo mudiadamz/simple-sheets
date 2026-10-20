@@ -20,6 +20,8 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
   and fetches the private repo with the `CORE_TOKEN` secret)
 - Run: `python simple_sheets.py [file]`
 - Test: `python -m pytest`
+- Test silently on Windows (no windows on your screen: pytest runs on its own hidden desktop, ~same speed):
+  `python -m simplecore.silent_tests [pytest args]` - use this by default (`SIMPLE_TESTS_VISIBLE=1` shows them)
 - Test headless (no windows on your screen, Linux + Xvfb in Docker/colima, ~30 s): `tools/test_headless.sh [pytest args]`
   (mounts this repo and `../simple-core` read-only; the image is built once from the requirements)
 - Build: `build.bat` → `dist\SimpleSheets.exe` + `dist\SimpleSheets-Setup.exe` (installer with the app inside) + `.sha256` + `SimpleSheets-portable.zip` (`python -m simplecore.package`). Close any running copy first; it locks the exe. From bash: `cmd //c build.bat`.
