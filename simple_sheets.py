@@ -131,6 +131,9 @@ class App(tk.Tk):
         app_menu.ai_button(self, top)          # right end of the row (packed before the format bar takes the rest)
         self.fmtbar = FormatBar(top, self, self.scale)
         self.fmtbar.pack(side="left", fill="x", expand=True)
+        from simplecore import titlebar
+        self.title_bar = titlebar.attach(self, top, drag=(self.fmtbar,))   # Windows: this row is the title bar
+        titlebar.menu_item(self.view_menu, self.title_bar)
 
         # formula bar: cell ref | value (editable) | format of the active cell
         fbar = ttk.Frame(self, padding=(4, 0, 4, 4))

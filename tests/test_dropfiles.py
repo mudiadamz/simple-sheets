@@ -39,4 +39,6 @@ def test_real_drop_message(app, tmp_path):
     u32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
     u32.SendMessageW(int(app.wm_frame(), 16), 0x0233, h, None)
     app.update()
+    from simplecore import winhook
+    winhook.pump(app)                                       # (opened on Tk's side, a moment after the message)
     assert app.path == path and app.table.text(0, 0)
