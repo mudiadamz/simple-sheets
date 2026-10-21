@@ -36,6 +36,10 @@ python3 -m PyInstaller --noconfirm --windowed --name "Simple Sheets" \
   -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:6 string tsv" \
   "dist/Simple Sheets.app/Contents/Info.plist" || true
 
+# sign again after the Info.plist changes (ad hoc: runs on this Mac; SIGN_ID="Developer ID Application: ..." signs)
+codesign --deep --force ${SIGN_ID:+--options runtime --timestamp} --sign "${SIGN_ID:--}" "dist/Simple Sheets.app"
+codesign --verify --deep "dist/Simple Sheets.app"
+
 rm -f "dist/SimpleSheets-${VERSION}.dmg"
 hdiutil create -volname "Simple Sheets" -srcfolder "dist/Simple Sheets.app" -ov -format UDZO \
   "dist/SimpleSheets-${VERSION}.dmg"

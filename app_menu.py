@@ -3,13 +3,13 @@ import os
 import tkinter as tk
 from tkinter import ttk
 
-from simplecore import recent
-from simplecore.ai_button import ai_button, disk_icon, refresh_ai_button, sparkle_icon  # noqa: F401
+from simplecore import icons, recent
+from simplecore.ai_button import ai_button, disk_icon, refresh_ai_button, save_images, sparkle_icon  # noqa: F401
 
 
 def build(app, parent):
     """☰ button (with its menu) plus small undo/redo buttons, packed left into `parent`."""
-    mb = ttk.Menubutton(parent, text="☰", style="Icon.Toolbutton", width=2)
+    mb = icons.icon(ttk.Menubutton(parent, width=2), "menu")
     mb.pack(side="left")
     menu = tk.Menu(mb, tearoff=False)
     recent_menu = tk.Menu(menu, tearoff=False, postcommand=lambda: fill_recent(app, recent_menu))
@@ -134,15 +134,15 @@ def build(app, parent):
     from format_bar import Tooltip
     Tooltip(mb, "Menu")
     # save: blue disk when there are unsaved changes, grey (disabled) when everything is saved
-    app.save_icons = {"on": disk_icon(app, app.scale, "#1a73e8"), "off": disk_icon(app, app.scale, "#b5b5b5")}
+    app.save_icons = save_images(app)
     app.save_btn = ttk.Button(parent, image=(app.save_icons["on"], "disabled", app.save_icons["off"]),
                               style="Icon.Toolbutton", command=app.save, state="disabled")
     app.save_btn.pack(side="left")
     Tooltip(app.save_btn, "Save (Ctrl+S)")
-    app.undo_btn = ttk.Button(parent, text="↶", style="Icon.Toolbutton", width=2, command=app.undo, state="disabled")
+    app.undo_btn = icons.icon(ttk.Button(parent, width=2, command=app.undo, state="disabled"), "undo")
     app.undo_btn.pack(side="left")
     Tooltip(app.undo_btn, "Undo (Ctrl+Z)")
-    app.redo_btn = ttk.Button(parent, text="↷", style="Icon.Toolbutton", width=2, command=app.redo, state="disabled")
+    app.redo_btn = icons.icon(ttk.Button(parent, width=2, command=app.redo, state="disabled"), "redo")
     app.redo_btn.pack(side="left")
     Tooltip(app.redo_btn, "Redo (Ctrl+Y)")
     ttk.Separator(parent, orient="vertical").pack(side="left", fill="y", padx=6, pady=(0, 4))

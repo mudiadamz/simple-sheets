@@ -139,7 +139,7 @@ class BorderButton:
         opts = ttk.Frame(f)
         opts.pack(side="left")
         self.swatch = tk.Canvas(opts, width=self.bar.px(28), height=self.bar.px(10), highlightthickness=1,
-                                highlightbackground=C["header_line"], background=self.color, cursor="hand2")
+                                highlightbackground=C["header_line"], background=self.color)
         self.swatch.grid(row=0, column=0, columnspan=3, pady=(0, 4), sticky="w")
         self.swatch.bind("<Button-1>", lambda e: self.pick_color())
         Tooltip(self.swatch, "Border colour")

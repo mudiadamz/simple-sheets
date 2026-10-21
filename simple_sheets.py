@@ -165,7 +165,7 @@ class App(tk.Tk):
         bottom.pack(side="bottom", fill="x")
         self.tabs = SheetTabs(bottom, self)
         self.tabs.pack(side="left", fill="x", expand=True)
-        self.zoom_label = ttk.Label(bottom, text="100%", width=5, anchor="e", cursor="hand2")
+        self.zoom_label = ttk.Label(bottom, text="100%", width=5, anchor="e")
         self.zoom_label.pack(side="right", padx=(0, 8))
         self.zoom_label.bind("<Button-1>", lambda e: self.zoom_to(1.0))
         Tooltip(self.zoom_label, "Zoom: Ctrl + / Ctrl - / Ctrl+wheel. Click for 100%")
@@ -1125,7 +1125,7 @@ class App(tk.Tk):
             limit = getattr(g.sheet, "loaded_limit", None)
             note = f" (first {limit:,} only - click to load all)" if limit and rows >= limit else ""
             self.status["text"] = f"{rows:,} rows{note}"
-            self.status.configure(cursor="hand2" if note else "")
+            self.status.configure(cursor="")
             v = g.value(*g.span(*g.cur)[:2])
             if v == "#CIRC!":                        # say which cells go round in a circle
                 self.status["text"] = self.circle_text(*g.span(*g.cur)[:2])

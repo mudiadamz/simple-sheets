@@ -29,7 +29,8 @@ def menu_labels(menu):
 
 def test_hamburger_menu_replaces_toolbar(app):
     texts = all_texts(app)
-    assert "☰" in texts
+    from simplecore import icons
+    assert icons.text(app, "menu") in texts                     # ☰ (Windows: its own icon font)
     assert not {"Open…", "Save", "Save As…", "↶ Undo", "↷ Redo"} & set(texts)
     labels = menu_labels(app.app_menu)
     core = ["New", "Open…", "Open recent", "Save", "Save as…", "Undo", "Redo", "View", "Exit"]

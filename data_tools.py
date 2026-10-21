@@ -306,8 +306,7 @@ class FilterPopup(tk.Toplevel):
             bycol.pack(fill="x", pady=(4, 0))
             ttk.Label(bycol, text="By colour:").pack(side="left")
             for col in colors:
-                sw = tk.Label(bycol, text="  " if col else "none", background=col or C["bg"], relief="solid", bd=1,
-                              cursor="hand2")
+                sw = tk.Label(bycol, text="  " if col else "none", background=col or C["bg"], relief="solid", bd=1)
                 sw.pack(side="left", padx=2)
                 sw.bind("<Button-1>", lambda e, col=col: self.by_color(col))
         ttk.Separator(f).pack(fill="x", pady=4)

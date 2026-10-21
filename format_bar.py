@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import colorchooser, ttk
 
+from simplecore import icons
 from simplecore.theme import C
 from simplecore.widgets import Tooltip  # noqa: F401  (others import it from here)
 
@@ -162,9 +163,11 @@ class FormatBar(ttk.Frame):
         for text, delta, tip in (("⇤", -1, "Decrease indent"), ("⇥", 1, "Increase indent")):
             b = ttk.Button(self, text=text, style="Toolbutton", width=2, command=lambda d=delta: self.indent(d))
             b.pack(side="left")
+            icons.symbol(b, "decrease.indent" if delta < 0 else "increase.indent")
             Tooltip(b, tip)
         rot = ttk.Menubutton(self, text="⟲", style="Toolbutton", width=2)
         rot.pack(side="left")
+        icons.symbol(rot, "rotate.left")
         Tooltip(rot, "Rotate text")
         m = tk.Menu(rot, tearoff=False)
         for label, deg in (("None", 0), ("Angle up (45°)", 45), ("Angle down (−45°)", -45), ("Up (90°)", 90),
@@ -212,6 +215,7 @@ class FormatBar(ttk.Frame):
         self.painter_btn = ttk.Button(self, image=self.icons["painter"], style="Toolbutton",
                                       command=self.app.format_painter)
         self.painter_btn.pack(side="left")
+        icons.symbol(self.painter_btn, "paintbrush")       # (on a Mac: the system's brush)
         Tooltip(self.painter_btn, "Format painter: copy this formatting, then select where it goes (Esc cancels)")
         self.sep()
         self.table_menu()
