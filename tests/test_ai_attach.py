@@ -156,11 +156,13 @@ def test_toolbar_button_toggles_pane(app):
     from simplecore import theme
 
     import app_menu
-    b = app.ai_btn
-    assert str(b.cget("background")) == theme.C["accent"] and not b.open
+    b = app.ai_btn                                                          # (a chip: the accent's tint, its text
+    rest = str(b.cget("background"))                                       #  in the accent)
+    assert rest == theme.blend(theme.C["bg"], theme.C["accent"], 0.13) and not b.open
+    assert str(b.cget("foreground")) == theme.C["accent"]
     b.event_generate("<Button-1>")
     app.update()
-    assert app.ai_pane.visible() and b.open and str(b.cget("relief")) == "sunken"
+    assert app.ai_pane.visible() and b.open and str(b.cget("background")) != rest   # (open: stronger)
     b.event_generate("<Button-1>")
     app.update()
     assert not app.ai_pane.visible() and not b.open
@@ -168,7 +170,7 @@ def test_toolbar_button_toggles_pane(app):
     try:
         app_menu.refresh_ai_button(app)
         assert theme.C["dark"] and theme.C["accent"] == "#4cc38a"            # (the app's own green, dark shade)
-        assert str(b.cget("background")) == theme.C["accent"] and str(b.cget("foreground")) == theme.DARK["on_accent"]
+        assert str(b.cget("foreground")) == theme.C["accent"]
     finally:
         app.set_theme(False)
 
