@@ -7,23 +7,23 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
   - Build sample files with `tests/workbooks.py`; use the `app` fixture and `open_in` / `key` helpers from `tests/conftest.py`.
   - Run `python -m pytest` from the project root and report the pass count before calling work done.
 - Keep the exe light: stdlib + `openpyxl` + `xlrd` + simplecore only at runtime (no pandas/numpy in app code).
-- **Shared UI core: `..\simple-core` (`simplecore` package)** — settings, recent files, theme, Tooltip, crash
+- **Shared UI core: `..` (`simplecore` package)** — settings, recent files, theme, Tooltip, crash
   dialog, drag & drop, text-box menu, screen capture, password-protected files, Google Drive, the ✦ AI pane and
   button, help window, installer, updates, packaging. Fix those THERE (Simple Docs gets the fix too), then run
-  simple-core's and Simple Docs' tests as well. Its own rules: `..\simple-core\CLAUDE.md`.
+  simple-core's and Simple Docs' tests as well. Its own rules: `..\CLAUDE.md`.
   - `version.py` tells it who the app is (`appinfo.configure`) and must be imported before it opens settings
     (conftest and `simple_sheets.py` do).
   - This app's parts: `ai_assist.py` (`SheetsProfile`: prompt, sheet as text, scripts), `help_ui.py` (shortcut list).
 
 ## Commands
-- Set up: `pip install -e ..\simple-core --config-settings editable_mode=compat` (CI pins `requirements-core.txt`
+- Set up: `pip install -e .. --config-settings editable_mode=compat` (CI pins `requirements-core.txt`
   and fetches the private repo with the `CORE_TOKEN` secret)
 - Run: `python simple_sheets.py [file]`
 - Test: `python -m pytest`
 - Test silently on Windows (no windows on your screen: pytest runs on its own hidden desktop, ~same speed):
   `python -m simplecore.silent_tests [pytest args]` - use this by default (`SIMPLE_TESTS_VISIBLE=1` shows them)
 - Test headless (no windows on your screen, Linux + Xvfb in Docker/colima, ~30 s): `tools/test_headless.sh [pytest args]`
-  (mounts this repo and `../simple-core` read-only; the image is built once from the requirements)
+  (mounts this repo and `..` read-only; the image is built once from the requirements)
 - Build: `build.bat` → `dist\SimpleSheets.exe` + `dist\SimpleSheets-Setup.exe` (installer with the app inside) + `.sha256` + `SimpleSheets-portable.zip` (`python -m simplecore.package`). Close any running copy first; it locks the exe. From bash: `cmd //c build.bat`.
 - Version: bump `APP_VERSION` in `version.py` (used by the app, installer and Settings > Apps).
 - Installer (`installer.py` → `simplecore.installer`): per-user, no admin. Installs to `%LOCALAPPDATA%\Programs\SimpleSheets`, Start menu shortcut, "Open with" for .xlsx/.xlsm/.xlsb/.xls/.ods/.csv/.tsv (HKCU registry), uninstaller in Settings > Apps (`Uninstall.exe --uninstall`). Silent: `Setup.exe /S [/D=folder] [/desktop] [/noopenwith] [/relaunch]` (log in `%TEMP%\SimpleSheets-setup.log`). Tests use the scratch key `HKCU\Software\SimpleSheetsTest`, never the real Classes keys.

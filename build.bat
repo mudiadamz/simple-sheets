@@ -3,7 +3,7 @@ rem Builds dist\SimpleSheets.exe (the app) and dist\SimpleSheets-Setup.exe (inst
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 python -m pip install -q -r requirements.txt pyinstaller pillow || exit /b 1
-python -c "import simplecore" || (echo simplecore isn't installed: pip install -e ..\simple-core --config-settings editable_mode=compat & exit /b 1)
+python -c "import simplecore" || (echo simplecore isn't installed: pip install -e .. --config-settings editable_mode=compat & exit /b 1)
 python tools\make_icon.py || exit /b 1
 
 rem Every app module goes in: many are only loaded when a menu item is used (__import__ in a lambda),

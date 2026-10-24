@@ -3,10 +3,10 @@
 # and the keyboard / mouse stay yours. Needs Docker (on macOS: `brew install colima docker`).
 #   tools/test_headless.sh                      all tests
 #   tools/test_headless.sh tests/test_grid.py -k wheel
-# The code is mounted, not copied: it tests what is on disk now, with ../simple-core (or SIMPLE_CORE=path).
+# The code is mounted, not copied: it tests what is on disk now, with .. (or SIMPLE_CORE=path).
 set -e
 cd "$(dirname "$0")/.."
-CORE=${SIMPLE_CORE:-../simple-core}
+CORE=${SIMPLE_CORE:-..}
 [ -d "$CORE/simplecore" ] || { echo "simple-core not found at $CORE (set SIMPLE_CORE)"; exit 2; }
 CORE=$(cd "$CORE" && pwd)
 if ! docker info >/dev/null 2>&1; then
