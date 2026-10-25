@@ -5,7 +5,8 @@ Light Tkinter spreadsheet viewer/editor for .xlsx/.xlsm/.xls/.ods/.csv, built in
 ## Rules
 - **Always write tests.** Every feature or fix ships with pytest tests in `tests/` in the same change — no throwaway scratch scripts as the only check.
   - Build sample files with `tests/workbooks.py`; use the `app` fixture and `open_in` / `key` helpers from `tests/conftest.py`.
-  - Run `python -m pytest` from the project root and report the pass count before calling work done.
+  - Run only the tests created or changed for the work (`python -m simplecore.silent_tests <their files>`) and report their pass count;
+    the full suite (`python -m pytest`) at most about twice a day, not after every change.
 - Keep the exe light: stdlib + `openpyxl` + `xlrd` + simplecore only at runtime (no pandas/numpy in app code).
 - **Shared UI core: `..` (`simplecore` package)** — settings, recent files, theme, Tooltip, crash
   dialog, drag & drop, text-box menu, screen capture, password-protected files, Google Drive, the ✦ AI pane and
