@@ -1,4 +1,4 @@
 # The shared UI core (github.com/mudiadamz/simple-core, private), pinned for CI and release builds.
 # While developing, install it editable instead (a fix there is live in every app):
 #   pip install -e .. --config-settings editable_mode=compat
-simplecore @ git+https://github.com/mudiadamz/simple-core@v0.3.54
+simplecore @ git+https://github.com/mudiadamz/simple-core@v0.3.55
