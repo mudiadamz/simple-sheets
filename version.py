@@ -7,7 +7,7 @@ from simplecore import appinfo, google_drive
 
 APP_NAME = "Simple Sheets"
 APP_ID = "SimpleSheets"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 EXE_NAME = "SimpleSheets.exe"
 
 appinfo.configure(

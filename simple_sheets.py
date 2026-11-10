@@ -1559,22 +1559,37 @@ class App(tk.Tk):
         self.table.commit()
         if not self.path or os.path.splitext(self.path)[1].lower() not in io.SAVABLE:
             return self.save_as()
-        return self.write(self.path)
+        return self.write(self.path, or_save_as=True)
 
-    def save_as(self):
+    def save_as(self, title=None):
         self.table.commit()
         named = self.path or getattr(self, "recovered_from", None) or getattr(self, "encrypted_from", None)
         stem = os.path.splitext(os.path.basename(named))[0] if named else "Untitled"
+        where = os.path.dirname(self.path) if self.path else ""
+        more = {"initialdir": where} if where and os.path.isdir(where) else {}
         dst = filedialog.asksaveasfilename(filetypes=SAVE_TYPES, defaultextension=".xlsx",
-                                           initialfile=stem + ".xlsx")
+                                           initialfile=stem + ".xlsx", **({"title": title} if title else {}), **more)
         if not dst:
             return False
         return self.write(dst)
 
-    def write(self, dst):
+    def save_as_instead(self, error):
+        """Save couldn't write the file (it's gone, its folder too, no permission any more…): Save as… a new
+        file, not a dead end - the workbook is still all here."""
+        name = os.path.basename(self.path or "") or "the file"
+        why = ("it's no longer there" if isinstance(error, FileNotFoundError) else
+               "it can't be written (permission)" if isinstance(error, PermissionError) else
+               (getattr(error, "strerror", None) or str(error)).rstrip("."))
+        return self.save_as(title=f"Couldn't save {name} - {why}. Save it as…")
+
+    def write(self, dst, or_save_as=False):
         # what the changes are patched into: the decrypted copy of a password-protected file, the file itself,
-        # or the template a new workbook came from
+        # or the template a new workbook came from - one that's gone: none (the workbook is written whole)
         src = getattr(self, "plain_src", None) or self.path or getattr(self, "template_src", None)
+        if src and not os.path.isfile(src):
+            src = None
+            if or_save_as:                       # (its file is gone: saved as a new one)
+                return self.save_as_instead(FileNotFoundError(2, "No such file or directory", self.path))
         src_ext = os.path.splitext(src)[1].lower() if src else ""
         dst_ext = os.path.splitext(dst)[1].lower()
         one_sheet = False
@@ -1652,6 +1667,8 @@ class App(tk.Tk):
             else:
                 raise ValueError(f"Can't save as '{dst_ext}'. Use .xlsx or .csv.")
         except Exception as e:
+            if or_save_as and isinstance(e, OSError):   # (a gone folder, no permission…: Save as…, not an error box)
+                return self.save_as_instead(e)
             messagebox.showerror("Save failed", str(e))
             return False
         if dst_ext in io.XLSX_EXTS:
